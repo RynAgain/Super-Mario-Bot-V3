@@ -1,0 +1,73 @@
+# Training Configuration for Super Mario Bros AI
+# Hyperparameters for Dueling DQN training
+
+training:
+  # Core Learning Parameters
+  learning_rate: 0.00025          # Adam optimizer learning rate
+  batch_size: 32                  # Training batch size
+  replay_buffer_size: 100000      # Experience replay buffer capacity
+  target_update_frequency: 1000   # Target network update interval (episodes)
+  
+  # Exploration Strategy (Epsilon-Greedy)
+  epsilon_start: 1.0              # Initial exploration rate
+  epsilon_end: 0.01               # Final exploration rate
+  epsilon_decay: 0.995            # Decay rate per episode
+  epsilon_decay_type: "exponential" # "exponential" or "linear"
+  
+  # Training Schedule
+  max_episodes: 50000             # Maximum training episodes
+  max_steps_per_episode: 18000    # Max steps per episode (5 min at 60 FPS)
+  warmup_episodes: 1000           # Episodes before training starts
+  save_frequency: 1000            # Model checkpoint save interval
+  evaluation_frequency: 500       # Evaluation run interval
+  
+  # Optimization Settings
+  optimizer: "Adam"               # Optimizer type
+  loss_function: "Huber"          # Loss function ("Huber", "MSE")
+  gradient_clipping: 10.0         # Gradient clipping threshold
+  gamma: 0.99                     # Discount factor
+  
+  # Advanced Training Options
+  double_dqn: true                # Enable Double DQN
+  prioritized_replay: false       # Enable prioritized experience replay
+  noisy_networks: false           # Enable noisy networks for exploration
+  
+  # Curriculum Learning
+  curriculum:
+    enabled: true
+    phases:
+      - name: "exploration"
+        episodes: 10000
+        epsilon_override: 0.8
+        reward_scaling: 1.2
+      - name: "optimization" 
+        episodes: 30000
+        epsilon_override: null
+        reward_scaling: 1.0
+      - name: "mastery"
+        episodes: 10000
+        epsilon_override: 0.05
+        reward_scaling: 0.9
+
+# Performance and Resource Management
+performance:
+  # GPU Settings
+  device: "cuda"                  # "cuda", "cpu", or "auto"
+  mixed_precision: true           # Enable automatic mixed precision
+  compile_model: true             # Use torch.compile for optimization
+  
+  # Memory Management
+  pin_memory: true                # Pin memory for faster GPU transfer
+  num_workers: 4                  # DataLoader worker processes
+  prefetch_factor: 2              # Prefetch batches per worker
+  
+  # Monitoring
+  profile_training: false         # Enable PyTorch profiler
+  log_gpu_memory: true           # Log GPU memory usage
+  
+# Checkpointing and Recovery
+checkpointing:
+  auto_save: true                 # Automatic checkpoint saving
+  keep_best_n: 5                 # Keep N best performing checkpoints
+  save_optimizer_state: true     # Save optimizer state in checkpoints
+  compression: true               # Compress checkpoint files

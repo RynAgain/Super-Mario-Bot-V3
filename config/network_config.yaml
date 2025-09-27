@@ -1,0 +1,96 @@
+# Neural Network Architecture Configuration
+# Dueling DQN with 8-frame stacking specifications
+
+network:
+  # Architecture Type
+  architecture: "dueling_dqn"     # Network architecture type
+  
+  # Input Specifications
+  frame_stack_size: 8             # Number of frames to stack
+  frame_size: [84, 84]            # Frame dimensions (height, width)
+  state_vector_size: 12           # Game state vector dimensions
+  num_actions: 12                 # Number of possible actions
+  
+  # Convolutional Layers
+  conv_layers:
+    - name: "conv1"
+      filters: 32                 # Number of output channels
+      kernel_size: 8              # Kernel size
+      stride: 4                   # Stride
+      padding: 2                  # Padding
+      activation: "relu"          # Activation function
+      batch_norm: false           # Batch normalization
+      
+    - name: "conv2"
+      filters: 64
+      kernel_size: 4
+      stride: 2
+      padding: 1
+      activation: "relu"
+      batch_norm: false
+      
+    - name: "conv3"
+      filters: 64
+      kernel_size: 3
+      stride: 1
+      padding: 1
+      activation: "relu"
+      batch_norm: false
+  
+  # Feature Fusion Layer
+  fusion_layer:
+    hidden_size: 512              # Hidden layer size
+    activation: "relu"            # Activation function
+    dropout: 0.3                  # Dropout rate
+    batch_norm: false             # Batch normalization
+  
+  # Dueling Architecture Streams
+  dueling_streams:
+    # Value Stream
+    value_stream:
+      hidden_layers: [256]        # Hidden layer sizes
+      activation: "relu"          # Activation function
+      dropout: 0.3                # Dropout rate
+      output_size: 1              # Single value output
+      
+    # Advantage Stream  
+    advantage_stream:
+      hidden_layers: [256]        # Hidden layer sizes
+      activation: "relu"          # Activation function
+      dropout: 0.3                # Dropout rate
+      output_size: 12             # One per action
+  
+  # Weight Initialization
+  initialization:
+    method: "kaiming_normal"      # "kaiming_normal", "xavier_uniform", etc.
+    nonlinearity: "relu"          # For kaiming initialization
+    bias_init: 0.0                # Bias initialization value
+  
+  # Regularization
+  regularization:
+    weight_decay: 0.0001          # L2 regularization
+    spectral_norm: false          # Spectral normalization
+    gradient_penalty: false       # Gradient penalty
+    
+# Model Variants (for experimentation)
+variants:
+  # Smaller model for faster training
+  small:
+    conv_layers:
+      - {filters: 16, kernel_size: 8, stride: 4, padding: 2}
+      - {filters: 32, kernel_size: 4, stride: 2, padding: 1}
+    fusion_layer: {hidden_size: 256}
+    dueling_streams:
+      value_stream: {hidden_layers: [128]}
+      advantage_stream: {hidden_layers: [128]}
+      
+  # Larger model for maximum performance
+  large:
+    conv_layers:
+      - {filters: 64, kernel_size: 8, stride: 4, padding: 2}
+      - {filters: 128, kernel_size: 4, stride: 2, padding: 1}
+      - {filters: 128, kernel_size: 3, stride: 1, padding: 1}
+    fusion_layer: {hidden_size: 1024}
+    dueling_streams:
+      value_stream: {hidden_layers: [512, 256]}
+      advantage_stream: {hidden_layers: [512, 256]}

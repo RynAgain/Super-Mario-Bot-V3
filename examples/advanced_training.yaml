@@ -1,0 +1,368 @@
+# Advanced Training Configuration for Super Mario Bros AI
+# This configuration is designed for experienced users and provides
+# sophisticated training features with optimized parameters for maximum performance.
+
+# Training Parameters
+training:
+  # Learning parameters
+  learning_rate: 0.0003
+  batch_size: 128
+  max_episodes: 50000
+  max_steps_per_episode: 2000
+  warmup_episodes: 500
+  
+  # Exploration parameters with sophisticated decay
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.9995
+  epsilon_schedule: "exponential"  # exponential, linear, cosine
+  
+  # Experience replay with prioritization
+  replay_buffer_size: 200000
+  min_replay_size: 10000
+  prioritized_replay: true
+  priority_alpha: 0.6
+  priority_beta_start: 0.4
+  priority_beta_end: 1.0
+  
+  # Network updates
+  target_update_frequency: 2000
+  gradient_clip_norm: 0.5
+  double_dqn: true
+  
+  # Advanced optimization
+  learning_rate_schedule:
+    enabled: true
+    scheduler: "cosine_annealing"
+    min_lr: 0.00001
+    warmup_steps: 1000
+  
+  # Checkpointing
+  save_frequency: 250
+  evaluation_frequency: 500
+  keep_best_n: 10
+  checkpoint_metrics: ["total_reward", "completion_rate", "distance_progress"]
+  
+  # Curriculum learning with multiple phases
+  curriculum:
+    enabled: true
+    adaptive: true
+    phases:
+      - name: "exploration"
+        episodes: 5000
+        epsilon_override: 0.9
+        reward_scaling: 1.0
+        description: "High exploration phase"
+      - name: "skill_building"
+        episodes: 15000
+        epsilon_override: 0.5
+        reward_scaling: 1.2
+        description: "Skill development phase"
+      - name: "optimization"
+        episodes: 20000
+        epsilon_override: null
+        reward_scaling: 1.5
+        description: "Performance optimization phase"
+      - name: "mastery"
+        episodes: 10000
+        epsilon_override: 0.05
+        reward_scaling: 2.0
+        description: "Mastery and fine-tuning phase"
+    
+    # Adaptive curriculum parameters
+    progression_threshold: 0.75
+    regression_threshold: 0.5
+    evaluation_window: 100
+
+# Performance Settings (Optimized for GPU)
+performance:
+  device: "cuda"
+  mixed_precision: true
+  compile_model: true
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  
+  # Memory optimization
+  gradient_checkpointing: true
+  memory_efficient_attention: true
+  
+  # Distributed training (if available)
+  distributed: false
+  world_size: 1
+  rank: 0
+
+# Network Configuration
+network:
+  host: "localhost"
+  port: 8765
+  connection_timeout: 60
+  heartbeat_interval: 5
+  max_reconnect_attempts: 10
+  buffer_size: 8192
+  compression: true
+
+# Advanced Reward System
+rewards:
+  # Primary rewards (level progression)
+  distance_reward_scale: 1.5
+  completion_reward: 2000.0
+  time_bonus_scale: 2.0
+  
+  # Milestone bonuses with progressive scaling
+  milestone_bonuses:
+    10_percent: 50
+    25_percent: 150
+    50_percent: 400
+    75_percent: 800
+    90_percent: 1200
+    95_percent: 1500
+  
+  # Secondary rewards
+  coin_reward: 75.0
+  enemy_kill_reward: 150.0
+  powerup_reward: 300.0
+  score_reward_scale: 0.02
+  secret_area_bonus: 500.0
+  
+  # Advanced bonuses
+  speed_bonus_scale: 0.5
+  efficiency_bonus: 100.0
+  consistency_bonus: 50.0
+  
+  # Penalties with adaptive scaling
+  death_penalty: -200.0
+  time_penalty_scale: 0.2
+  backward_movement_penalty: 1.0
+  stuck_penalty: 2.0
+  stuck_threshold_frames: 90
+  
+  # Reward shaping
+  reward_clipping: true
+  reward_clip_range: [-500, 500]
+  reward_normalization: true
+
+# Frame Capture Settings (Enhanced)
+capture:
+  frame_width: 84
+  frame_height: 84
+  frame_stack_size: 8  # Increased for better temporal understanding
+  preprocessing:
+    normalize: true
+    grayscale: true
+    resize_method: "lanczos"
+    contrast_enhancement: true
+    noise_reduction: true
+    edge_enhancement: false
+  
+  # Frame augmentation
+  augmentation:
+    enabled: true
+    brightness_range: [0.9, 1.1]
+    contrast_range: [0.9, 1.1]
+    noise_std: 0.01
+
+# Comprehensive Logging Configuration
+logging:
+  log_level: "INFO"
+  csv_logging: true
+  plot_generation: true
+  checkpoint_compression: true
+  max_log_files: 50
+  log_rotation_size_mb: 200
+  
+  # Advanced metrics
+  log_training_steps: true
+  log_episode_summaries: true
+  log_performance_metrics: true
+  log_sync_quality: true
+  log_debug_events: true
+  log_gradient_norms: true
+  log_weight_histograms: false
+  log_activation_stats: false
+  
+  # Real-time monitoring
+  tensorboard_logging: true
+  wandb_logging: false
+  mlflow_logging: false
+  
+  # Custom metrics
+  custom_metrics:
+    - "exploration_efficiency"
+    - "learning_stability"
+    - "action_diversity"
+    - "state_coverage"
+
+# Game-specific Settings (Enhanced)
+game:
+  # Memory addresses (standard Super Mario Bros)
+  memory_addresses:
+    mario_x: 0x006D
+    mario_y: 0x00CE
+    mario_state: 0x000E
+    mario_direction: 0x0045
+    mario_speed_x: 0x0057
+    mario_speed_y: 0x009F
+    score: [0x07DD, 0x07DE, 0x07DF]
+    coins: 0x07ED
+    lives: 0x075A
+    time: [0x07F8, 0x07F9, 0x07FA]
+    level: 0x075F
+    area: 0x0760
+    powerup: 0x0756
+    enemy_positions: [0x0087, 0x0088, 0x0089, 0x008A, 0x008B]
+    
+  # Enhanced action space
+  actions:
+    0: "no_action"
+    1: "right"
+    2: "left"
+    3: "jump"
+    4: "right_jump"
+    5: "left_jump"
+    6: "run"
+    7: "right_run"
+    8: "left_run"
+    9: "right_jump_run"
+    10: "left_jump_run"
+    11: "crouch"
+  
+  # Multi-level support
+  levels:
+    - "1-1"
+    - "1-2"
+    - "2-1"
+    - "3-1"
+    - "4-1"
+  
+  level_progression:
+    enabled: true
+    mastery_threshold: 0.8
+    episodes_per_level: 2000
+    adaptive_difficulty: true
+
+# Advanced Neural Network Architecture
+neural_network:
+  # Enhanced convolutional layers
+  conv_layers:
+    - filters: 32
+      kernel_size: 8
+      stride: 4
+      activation: "relu"
+      batch_norm: true
+      dropout: 0.1
+    - filters: 64
+      kernel_size: 4
+      stride: 2
+      activation: "relu"
+      batch_norm: true
+      dropout: 0.1
+    - filters: 128
+      kernel_size: 3
+      stride: 1
+      activation: "relu"
+      batch_norm: true
+      dropout: 0.1
+    - filters: 128
+      kernel_size: 3
+      stride: 1
+      activation: "relu"
+      batch_norm: true
+      dropout: 0.1
+  
+  # Enhanced fully connected layers
+  fc_hidden_size: 1024
+  dueling_streams:
+    value_hidden: 512
+    advantage_hidden: 512
+  
+  # Advanced regularization
+  dropout_rate: 0.2
+  batch_norm: true
+  layer_norm: false
+  spectral_norm: false
+  
+  # Attention mechanism
+  attention:
+    enabled: true
+    num_heads: 8
+    hidden_dim: 256
+  
+  # Output
+  num_actions: 12
+  
+  # Architecture enhancements
+  residual_connections: true
+  squeeze_excitation: true
+  channel_attention: true
+
+# Advanced Optimization Settings
+optimization:
+  optimizer: "adamw"
+  adam_eps: 1e-8
+  weight_decay: 0.01
+  amsgrad: true
+  
+  # Learning rate scheduling
+  lr_scheduler:
+    enabled: true
+    scheduler: "cosine_annealing_warm_restarts"
+    t_0: 1000
+    t_mult: 2
+    eta_min: 1e-6
+  
+  # Gradient optimization
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  gradient_centralization: true
+  
+  # Loss function enhancements
+  loss_function: "huber"
+  huber_delta: 1.0
+  label_smoothing: 0.1
+
+# Early Stopping and Model Selection
+early_stopping:
+  enabled: true
+  patience: 2000
+  min_delta: 0.01
+  monitor: "episode_reward_ma"  # Moving average
+  mode: "max"
+  restore_best_weights: true
+
+# Model Ensemble (Experimental)
+ensemble:
+  enabled: false
+  num_models: 3
+  voting_strategy: "soft"
+  diversity_regularization: 0.1
+
+# Hyperparameter Optimization
+hyperopt:
+  enabled: false
+  search_space:
+    learning_rate: [0.0001, 0.001]
+    batch_size: [64, 128, 256]
+    epsilon_decay: [0.995, 0.999]
+  search_algorithm: "tpe"
+  max_trials: 50
+
+# Comments and Notes
+# This advanced configuration is designed for:
+# - Experienced users seeking maximum performance
+# - Long-term training sessions (days to weeks)
+# - Multi-level mastery and generalization
+# - Research and experimentation
+# - GPU-accelerated training
+#
+# Expected training time: 1-2 weeks for full mastery
+# Expected performance: 90%+ level completion rate
+# GPU memory requirement: 8GB+ VRAM recommended
+#
+# To use this configuration:
+# python python/main.py train --config examples/advanced_training.yaml
+#
+# Monitor training with:
+# tensorboard --logdir logs/tensorboard
+# python python/logging/plotter.py --session your_session_id

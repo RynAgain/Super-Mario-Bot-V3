@@ -1,0 +1,187 @@
+# Basic Training Configuration for Super Mario Bros AI
+# This configuration is designed for beginners and provides a simple,
+# stable training setup with conservative parameters.
+
+# Training Parameters
+training:
+  # Learning parameters
+  learning_rate: 0.001
+  batch_size: 32
+  max_episodes: 5000
+  max_steps_per_episode: 1000
+  warmup_episodes: 100
+  
+  # Exploration parameters
+  epsilon_start: 1.0
+  epsilon_end: 0.1
+  epsilon_decay: 0.995
+  
+  # Experience replay
+  replay_buffer_size: 50000
+  min_replay_size: 1000
+  
+  # Network updates
+  target_update_frequency: 1000
+  gradient_clip_norm: 1.0
+  
+  # Checkpointing
+  save_frequency: 100
+  evaluation_frequency: 100
+  keep_best_n: 3
+  
+  # Curriculum learning (disabled for basic training)
+  curriculum:
+    enabled: false
+
+# Performance Settings
+performance:
+  device: "auto"  # Auto-detect GPU/CPU
+  mixed_precision: false
+  compile_model: false
+  num_workers: 1
+  pin_memory: false
+
+# Network Configuration
+network:
+  host: "localhost"
+  port: 8765
+  connection_timeout: 30
+  heartbeat_interval: 10
+  max_reconnect_attempts: 5
+
+# Reward System
+rewards:
+  # Primary rewards (level progression)
+  distance_reward_scale: 1.0
+  completion_reward: 1000.0
+  milestone_bonuses:
+    25_percent: 100
+    50_percent: 250
+    75_percent: 500
+    90_percent: 750
+  
+  # Secondary rewards
+  coin_reward: 50.0
+  enemy_kill_reward: 100.0
+  powerup_reward: 200.0
+  score_reward_scale: 0.01
+  
+  # Penalties
+  death_penalty: -100.0
+  time_penalty_scale: 0.1
+  backward_movement_penalty: 0.5
+  stuck_penalty: 1.0
+  stuck_threshold_frames: 120
+
+# Frame Capture Settings
+capture:
+  frame_width: 84
+  frame_height: 84
+  frame_stack_size: 4
+  preprocessing:
+    normalize: true
+    grayscale: true
+    resize_method: "bilinear"
+
+# Logging Configuration
+logging:
+  log_level: "INFO"
+  csv_logging: true
+  plot_generation: true
+  checkpoint_compression: false
+  max_log_files: 20
+  log_rotation_size_mb: 100
+  
+  # Metrics to log
+  log_training_steps: true
+  log_episode_summaries: true
+  log_performance_metrics: true
+  log_sync_quality: true
+  log_debug_events: true
+
+# Game-specific Settings
+game:
+  # Memory addresses (standard Super Mario Bros)
+  memory_addresses:
+    mario_x: 0x006D
+    mario_y: 0x00CE
+    mario_state: 0x000E
+    score: [0x07DD, 0x07DE, 0x07DF]
+    coins: 0x07ED
+    lives: 0x075A
+    time: [0x07F8, 0x07F9, 0x07FA]
+    level: 0x075F
+    area: 0x0760
+    powerup: 0x0756
+  
+  # Action space (12 actions)
+  actions:
+    0: "no_action"
+    1: "right"
+    2: "left" 
+    3: "jump"
+    4: "right_jump"
+    5: "left_jump"
+    6: "run"
+    7: "right_run"
+    8: "left_run"
+    9: "right_jump_run"
+    10: "left_jump_run"
+    11: "crouch"
+
+# Neural Network Architecture
+neural_network:
+  # Convolutional layers
+  conv_layers:
+    - filters: 32
+      kernel_size: 8
+      stride: 4
+      activation: "relu"
+    - filters: 64
+      kernel_size: 4
+      stride: 2
+      activation: "relu"
+    - filters: 64
+      kernel_size: 3
+      stride: 1
+      activation: "relu"
+  
+  # Fully connected layers
+  fc_hidden_size: 512
+  dueling_streams:
+    value_hidden: 256
+    advantage_hidden: 256
+  
+  # Regularization
+  dropout_rate: 0.0
+  batch_norm: false
+  
+  # Output
+  num_actions: 12
+
+# Optimization Settings
+optimization:
+  optimizer: "adam"
+  adam_eps: 1e-8
+  weight_decay: 0.0
+  lr_scheduler: null
+  
+# Early Stopping (disabled for basic training)
+early_stopping:
+  enabled: false
+  patience: 500
+  min_delta: 0.01
+  monitor: "episode_reward"
+
+# Comments and Notes
+# This basic configuration is designed for:
+# - New users learning the system
+# - Quick testing and validation
+# - Stable, conservative training
+# - Single-level mastery (World 1-1)
+#
+# Expected training time: 2-4 hours for basic competency
+# Expected performance: 50-70% level completion rate
+#
+# To use this configuration:
+# python python/main.py train --config examples/basic_training.yaml
