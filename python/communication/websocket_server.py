@@ -10,20 +10,44 @@ import json
 import logging
 import struct
 import time
-from typing import Dict, Any, Optional, Callable, List
+import random
+from typing import Dict, Any, Optional, Callable, List, Set
 import websockets
 from websockets.server import WebSocketServerProtocol
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError, ConnectionClosedOK
 
 from ..utils.preprocessing import BinaryPayloadParser, EnhancedFeatureValidator
+
+
+class ConnectionState:
+    """Tracks connection state and health metrics."""
+    
+    def __init__(self):
+        self.connected = False
+        self.connection_start_time = 0
+        self.last_ping_sent = 0
+        self.last_pong_received = 0
+        self.last_message_received = 0
+        self.ping_failures = 0
+        self.consecutive_timeouts = 0
+        self.total_messages_sent = 0
+        self.total_messages_received = 0
+        self.reconnect_attempts = 0
+        self.connection_quality = 1.0  # 0.0 to 1.0
+        self.latency_ms = 0
+        self.is_degraded = False
 
 
 class WebSocketServer:
     """
     WebSocket server that handles communication with FCEUX Lua script.
     
-    Implements the hybrid protocol:
+    Implements the hybrid protocol with robust connection handling:
     - JSON messages for control, configuration, and debug information
     - Binary messages for high-frequency game state data
+    - Proper ping/pong keepalive mechanism
+    - Connection health monitoring and graceful degradation
+    - Exponential backoff reconnection with jitter
     """
     
     def __init__(self, host: str = "localhost", port: int = 8765, enhanced_features: bool = False):
@@ -52,14 +76,37 @@ class WebSocketServer:
         self.binary_handler: Optional[Callable] = None
         self.enhanced_state_handler: Optional[Callable] = None
         
-        # Connection state
+        # Connection state and health monitoring
+        self.connection_state = ConnectionState()
         self.client_info: Dict[str, Any] = {}
-        self.last_ping_time = 0
-        self.ping_interval = 1.0  # 1 second
+        
+        # Heartbeat and keepalive configuration
+        self.ping_interval = 15.0  # Send ping every 15 seconds
+        self.ping_timeout = 45.0   # Timeout after 45 seconds without pong
+        self.heartbeat_interval = 5.0  # Send heartbeat message every 5 seconds
+        self.last_heartbeat_sent = 0
+        self.pending_pings: Set[str] = set()  # Track pending ping IDs
+        
+        # Connection quality and degradation
+        self.quality_check_interval = 10.0  # Check quality every 10 seconds
+        self.last_quality_check = 0
+        self.degradation_threshold = 0.7  # Quality below this triggers degradation
+        self.recovery_threshold = 0.9     # Quality above this recovers from degradation
+        
+        # Reconnection with exponential backoff
+        self.base_reconnect_delay = 1.0    # Base delay in seconds
+        self.max_reconnect_delay = 30.0    # Maximum delay in seconds
+        self.reconnect_jitter = 0.1        # Jitter factor (10%)
+        self.max_reconnect_attempts = 10   # Maximum reconnection attempts
         
         # Frame synchronization
         self.current_frame_id = 0
         self.frame_sync_enabled = True
+        self.frame_ack_enabled = True  # Re-enable frame acknowledgments
+        
+        # Input queuing during reconnection
+        self.input_queue = asyncio.Queue(maxsize=100)
+        self.is_reconnecting = False
         
         # Enhanced communication statistics
         self.enhanced_stats = {
@@ -68,6 +115,16 @@ class WebSocketServer:
             'validation_errors': 0,
             'feature_validation_warnings': 0,
             'payload_size_mismatches': 0
+        }
+        
+        # Connection quality metrics
+        self.quality_metrics = {
+            'ping_success_rate': 1.0,
+            'message_success_rate': 1.0,
+            'average_latency': 0.0,
+            'connection_uptime': 0.0,
+            'reconnection_count': 0,
+            'degradation_events': 0
         }
         
         # Setup logging
