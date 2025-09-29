@@ -1,0 +1,184 @@
+# Neural Network Architecture Configuration
+# Dueling DQN with 8-frame stacking specifications
+
+network:
+  # Architecture Type
+  architecture: "dueling_dqn"     # Network architecture type
+  
+  # Input Specifications
+  frame_stack_size: 4             # Number of frames to stack (optimized for performance)
+  frame_size: [84, 84]            # Frame dimensions (height, width)
+  state_vector_size: 12           # Game state vector dimensions (12 or 20)
+  enhanced_features: false        # Enable enhanced 20-feature mode
+  num_actions: 12                 # Number of possible actions
+  
+  # Convolutional Layers
+  conv_layers:
+    - name: "conv1"
+      filters: 32                 # Number of output channels
+      kernel_size: 8              # Kernel size
+      stride: 4                   # Stride
+      padding: 2                  # Padding
+      activation: "relu"          # Activation function
+      batch_norm: false           # Batch normalization
+      
+    - name: "conv2"
+      filters: 64
+      kernel_size: 4
+      stride: 2
+      padding: 1
+      activation: "relu"
+      batch_norm: false
+      
+    - name: "conv3"
+      filters: 64
+      kernel_size: 3
+      stride: 1
+      padding: 1
+      activation: "relu"
+      batch_norm: false
+  
+  # Feature Fusion Layer
+  fusion_layer:
+    hidden_size: 512              # Hidden layer size
+    activation: "relu"            # Activation function
+    dropout: 0.3                  # Dropout rate
+    batch_norm: false             # Batch normalization
+  
+  # Dueling Architecture Streams
+  dueling_streams:
+    # Value Stream
+    value_stream:
+      hidden_layers: [256]        # Hidden layer sizes
+      activation: "relu"          # Activation function
+      dropout: 0.3                # Dropout rate
+      output_size: 1              # Single value output
+      
+    # Advantage Stream  
+    advantage_stream:
+      hidden_layers: [256]        # Hidden layer sizes
+      activation: "relu"          # Activation function
+      dropout: 0.3                # Dropout rate
+      output_size: 12             # One per action
+  
+  # Weight Initialization
+  initialization:
+    method: "kaiming_normal"      # "kaiming_normal", "xavier_uniform", etc.
+    nonlinearity: "relu"          # For kaiming initialization
+    bias_init: 0.0                # Bias initialization value
+  
+  # Regularization
+  regularization:
+    weight_decay: 0.0001          # L2 regularization
+    spectral_norm: false          # Spectral normalization
+    gradient_penalty: false       # Gradient penalty
+    
+# Model Variants (for experimentation)
+variants:
+  # Smaller model for faster training
+  small:
+    conv_layers:
+      - {filters: 16, kernel_size: 8, stride: 4, padding: 2}
+      - {filters: 32, kernel_size: 4, stride: 2, padding: 1}
+    fusion_layer: {hidden_size: 256}
+    dueling_streams:
+      value_stream: {hidden_layers: [128]}
+      advantage_stream: {hidden_layers: [128]}
+      
+  # Larger model for maximum performance
+  large:
+    conv_layers:
+      - {filters: 64, kernel_size: 8, stride: 4, padding: 2}
+      - {filters: 128, kernel_size: 4, stride: 2, padding: 1}
+      - {filters: 128, kernel_size: 3, stride: 1, padding: 1}
+    fusion_layer: {hidden_size: 1024}
+    dueling_streams:
+      value_stream: {hidden_layers: [512, 256]}
+      advantage_stream: {hidden_layers: [512, 256]}
+
+# WebSocket Communication Configuration
+websocket:
+  host: "localhost"               # WebSocket server host
+  port: 8765                      # WebSocket server port
+  max_connections: 1              # Maximum concurrent connections
+  ping_interval: 30               # Ping interval in seconds
+  ping_timeout: 10                # Ping timeout in seconds
+  close_timeout: 10               # Close timeout in seconds
+  
+# Communication Protocol Settings
+communication:
+  frame_sync_timeout: 5.0         # Frame synchronization timeout
+  action_timeout: 1.0             # Action response timeout
+  reconnect_attempts: 3           # Number of reconnection attempts
+  reconnect_delay: 2.0            # Delay between reconnection attempts
+  buffer_size: 1024               # Message buffer size
+  compression: false              # Enable message compression
+
+# Enhanced Features Configuration
+enhanced_features:
+  # State vector configuration
+  enabled: false                  # Enable enhanced 20-feature state vector
+  backward_compatible: true       # Maintain compatibility with 12-feature checkpoints
+  
+  # Feature categories (8 additional features when enabled)
+  categories:
+    enemy_threat_assessment: 2    # Closest enemy distance, enemy count
+    powerup_detection: 2          # Power-up present, power-up distance
+    environmental_awareness: 2    # Solid tiles ahead, pit detection
+    enhanced_mario_state: 2       # Velocity magnitude, facing direction
+  
+  # Network architecture adjustments for enhanced features
+  architecture_adjustments:
+    # Fusion layer may need larger size for 20 features
+    fusion_hidden_size_20: 640    # Increased from 512 for 20-feature mode
+    
+    # Value and advantage streams remain the same
+    # The network will automatically adapt to input size
+  
+  # Validation settings
+  validation:
+    check_payload_size: true      # Validate 128-byte payload from Lua
+    check_feature_ranges: true    # Validate feature value ranges
+    log_feature_stats: false      # Log feature statistics (debug mode)
+
+# Enhanced Communication Protocol Configuration
+enhanced_communication:
+  # Protocol settings
+  protocol_version: "1.1"         # Enhanced protocol version
+  payload_size: 128               # Expected payload size for enhanced mode
+  backward_compatible: true       # Support legacy 80-byte payloads
+  
+  # Binary payload parsing
+  binary_parsing:
+    enabled: true                 # Enable enhanced binary payload parsing
+    validation_enabled: true      # Enable payload validation
+    strict_mode: false            # Strict validation (drop invalid frames)
+    
+  # Enhanced reward calculation
+  reward_calculation:
+    enabled: true                 # Enable enhanced reward calculation
+    feature_weights:
+      powerup_collection: 1.0     # Power-up collection weight
+      enemy_elimination: 1.0      # Enemy elimination weight
+      environmental_awareness: 1.0 # Environmental navigation weight
+      velocity_movement: 1.0      # Velocity-based movement weight
+      strategic_positioning: 1.0  # Strategic positioning weight
+    
+  # State processing
+  state_processing:
+    normalization_enabled: true   # Enable state normalization
+    preprocessing_enabled: true   # Enable Mario preprocessing
+    frame_stacking: true          # Enable frame stacking
+    
+  # Error handling and logging
+  error_handling:
+    drop_invalid_frames: false    # Drop frames with validation errors
+    log_validation_warnings: true # Log validation warnings
+    log_parsing_errors: true     # Log parsing errors
+    max_consecutive_errors: 10    # Max consecutive errors before fallback
+    
+  # Performance monitoring
+  monitoring:
+    track_statistics: true        # Track enhanced communication statistics
+    log_performance_metrics: false # Log performance metrics periodically
+    reset_stats_on_episode: false # Reset statistics on new episode

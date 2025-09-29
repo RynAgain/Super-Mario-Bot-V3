@@ -1,0 +1,13 @@
+timestamp,episode,step,event_type,severity,component,message,mario_x,mario_y,action_taken,game_state,stack_trace
+2025-09-29T02:22:19.345636,1,72,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:19.346799,1,72,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.760771,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.762042,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.772195,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.772649,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.773012,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.773465,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.774124,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.776836,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:21.777104,1,1,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2025-09-29T02:22:33.183383,2,603,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,

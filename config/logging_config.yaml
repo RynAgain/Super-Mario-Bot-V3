@@ -1,0 +1,161 @@
+# Logging Configuration
+# CSV logging, debug logs, and performance monitoring
+
+logging:
+  # General Logging Settings
+  level: "INFO"                   # Logging level (DEBUG, INFO, WARNING, ERROR)
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  date_format: "%Y-%m-%d %H:%M:%S"
+  
+  # File Logging
+  files:
+    # Training Performance Log (CSV)
+    training_log:
+      path: "data/logs/training_logs/training_{timestamp}.csv"
+      enabled: true
+      level: "INFO"
+      
+    # Debug Log (Text)
+    debug_log:
+      path: "data/logs/debug_logs/debug_{timestamp}.log"
+      enabled: true
+      level: "DEBUG"
+      max_size_mb: 100            # Max file size before rotation
+      backup_count: 5             # Number of backup files
+      
+    # Performance Metrics Log (CSV)
+    performance_log:
+      path: "data/logs/training_logs/performance_{timestamp}.csv"
+      enabled: true
+      level: "INFO"
+      
+    # Error Log (Text)
+    error_log:
+      path: "data/logs/debug_logs/error_{timestamp}.log"
+      enabled: true
+      level: "ERROR"
+  
+  # Console Logging
+  console:
+    enabled: true
+    level: "INFO"
+    colored: true                 # Colored console output
+    
+  # CSV Logging Schemas
+  csv_schemas:
+    # Main Training Log
+    training:
+      columns:
+        - episode                 # Episode number
+        - step                    # Step within episode
+        - reward                  # Step reward
+        - total_reward            # Episode total reward
+        - epsilon                 # Current exploration rate
+        - loss                    # Neural network loss
+        - q_value_mean            # Mean Q-value
+        - mario_x_max             # Maximum X position reached
+        - mario_x_final           # Final X position
+        - level_completed         # Boolean: level completed
+        - death_cause             # Cause of death (if applicable)
+        - lives_remaining         # Lives at episode end
+        - score                   # Final score
+        - coins_collected         # Coins collected
+        - enemies_killed          # Enemies eliminated
+        - time_remaining          # Time remaining at end
+        - episode_duration        # Episode duration (seconds)
+        - processing_time         # Processing time per step (ms)
+        - sync_quality            # Frame sync quality (ms)
+        - timestamp               # Timestamp
+        
+    # Performance Metrics Log
+    performance:
+      columns:
+        - episode                 # Episode number
+        - fps                     # Frames per second
+        - memory_usage_mb         # Memory usage (MB)
+        - gpu_memory_mb           # GPU memory usage (MB)
+        - cpu_percent             # CPU usage percentage
+        - network_inference_ms    # Neural network inference time
+        - frame_processing_ms     # Frame processing time
+        - websocket_latency_ms    # WebSocket communication latency
+        - replay_buffer_size      # Current replay buffer size
+        - learning_rate           # Current learning rate
+        - timestamp               # Timestamp
+        
+    # Synchronization Quality Log
+    sync_quality:
+      columns:
+        - episode                 # Episode number
+        - step                    # Step number
+        - frame_id                # Frame ID
+        - sync_delay_ms           # Synchronization delay
+        - desync_events           # Number of desync events
+        - recovery_time_ms        # Time to recover from desync
+        - timestamp               # Timestamp
+  
+  # TensorBoard Integration
+  tensorboard:
+    enabled: true
+    log_dir: "data/logs/tensorboard"
+    update_frequency: 100         # Log every N steps
+    
+    # Metrics to log
+    metrics:
+      scalars:
+        - "reward/episode_total"
+        - "reward/step_mean"
+        - "training/loss"
+        - "training/epsilon"
+        - "training/learning_rate"
+        - "game/mario_x_max"
+        - "game/level_completion_rate"
+        - "performance/fps"
+        - "performance/memory_usage"
+        
+      histograms:
+        - "network/q_values"
+        - "network/gradients"
+        - "reward/distribution"
+        
+      images:
+        - "game/current_frame"
+        - "game/frame_stack"
+  
+  # Monitoring and Alerts
+  monitoring:
+    # Performance Alerts
+    alerts:
+      low_fps:
+        threshold: 30             # Alert if FPS drops below 30
+        enabled: true
+        
+      high_memory:
+        threshold: 8000           # Alert if memory usage > 8GB
+        enabled: true
+        
+      training_stalled:
+        threshold: 1000           # Alert if no improvement for N episodes
+        enabled: true
+        
+      desync_rate:
+        threshold: 0.05           # Alert if desync rate > 5%
+        enabled: true
+    
+    # Health Checks
+    health_checks:
+      websocket_connection: true  # Monitor WebSocket connection
+      gpu_availability: true     # Monitor GPU availability
+      disk_space: true           # Monitor disk space
+      
+  # Log Retention
+  retention:
+    training_logs_days: 30        # Keep training logs for 30 days
+    debug_logs_days: 7            # Keep debug logs for 7 days
+    performance_logs_days: 14     # Keep performance logs for 14 days
+    tensorboard_logs_days: 60     # Keep TensorBoard logs for 60 days
+    
+  # Compression and Archival
+  archival:
+    compress_old_logs: true       # Compress logs older than 1 day
+    archive_threshold_days: 7     # Archive logs older than 7 days
+    archive_location: "data/logs/archive"

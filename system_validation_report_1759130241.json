@@ -1,0 +1,284 @@
+{
+  "validation_timestamp": 1759130241.605525,
+  "validation_duration_seconds": 1.1315083503723145,
+  "configuration": {
+    "test_enhanced": true,
+    "test_legacy": false,
+    "performance_tests": true,
+    "test_error_handling": true,
+    "test_checkpoints": true,
+    "verbose": false,
+    "report_only": false
+  },
+  "pre_validation": {
+    "passed": true,
+    "checks": {
+      "python_version": {
+        "passed": true,
+        "message": "Python 3.13.1 is compatible",
+        "version": "3.13.1"
+      },
+      "dependencies": {
+        "passed": true,
+        "available_packages": [
+          "torch (2.7.1+cu118)",
+          "numpy (2.2.6)",
+          "websockets (15.0.1)",
+          "asyncio",
+          "cv2 (4.12.0)"
+        ],
+        "missing_packages": [],
+        "message": "5/5 required packages available"
+      },
+      "file_structure": {
+        "passed": true,
+        "existing_files": [
+          "lua/mario_ai.lua",
+          "python/utils/preprocessing.py",
+          "python/environment/reward_calculator.py",
+          "python/communication/websocket_server.py",
+          "python/communication/comm_manager.py",
+          "python/models/dueling_dqn.py",
+          "python/agents/dqn_agent.py"
+        ],
+        "missing_files": [],
+        "message": "7/7 required files found"
+      },
+      "configuration_files": {
+        "passed": true,
+        "config_status": {
+          "config/training_config.yaml": {
+            "exists": true,
+            "valid": true,
+            "keys": [
+              "training",
+              "performance",
+              "checkpointing",
+              "network",
+              "enhanced_memory",
+              "enhanced_rewards"
+            ]
+          },
+          "config/network_config.yaml": {
+            "exists": true,
+            "valid": true,
+            "keys": [
+              "network",
+              "variants",
+              "websocket",
+              "communication",
+              "enhanced_features",
+              "enhanced_communication"
+            ]
+          }
+        },
+        "message": "Configuration files validation: passed"
+      }
+    },
+    "summary": "4/4 checks passed"
+  },
+  "integration_tests": {
+    "overall_status": "FAILED",
+    "system_ready_for_training": false,
+    "execution_time_seconds": 0.11385130882263184,
+    "test_statistics": {
+      "total_tests": 31,
+      "tests_passed": 21,
+      "tests_failed": 10,
+      "success_rate_percent": 67.74193548387096
+    },
+    "category_results": {
+      "Lua Memory Reading": {
+        "status": "FAILED",
+        "tests_passed": 2,
+        "tests_failed": 1,
+        "details": [
+          "[PASS] Enhanced memory addresses validated",
+          "[FAIL] Payload generation test failed: 'I' format requires 0 <= number <= 4294967295",
+          "[PASS] Enhanced feature flags validated"
+        ]
+      },
+      "Binary Protocol": {
+        "status": "FAILED",
+        "tests_passed": 0,
+        "tests_failed": 3,
+        "details": [
+          "[FAIL] Binary payload parsing failed: 'I' format requires 0 <= number <= 4294967295",
+          "[FAIL] Payload validation failed: 'I' format requires 0 <= number <= 4294967295",
+          "[FAIL] WebSocket protocol test failed: 'I' format requires 0 <= number <= 4294967295"
+        ]
+      },
+      "State Processing": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] 12-feature mode processing validated",
+          "[PASS] 20-feature mode processing validated",
+          "[PASS] Frame stacking with variable state sizes validated",
+          "[PASS] Mario preprocessor integration validated"
+        ]
+      },
+      "Reward Calculation": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Basic reward calculation validated",
+          "[PASS] Enhanced reward calculation validated",
+          "[PASS] Death penalty calculation validated",
+          "[PASS] Reward component validation passed"
+        ]
+      },
+      "Configuration Switching": {
+        "status": "FAILED",
+        "tests_passed": 2,
+        "tests_failed": 1,
+        "details": [
+          "[PASS] Dynamic feature switching validated",
+          "[FAIL] Backward compatibility test failed: 'I' format requires 0 <= number <= 4294967295",
+          "[PASS] Configuration validation passed"
+        ]
+      },
+      "Error Handling": {
+        "status": "FAILED",
+        "tests_passed": 3,
+        "tests_failed": 1,
+        "details": [
+          "[PASS] Malformed payload handling validated",
+          "[PASS] Invalid state data handling validated",
+          "[FAIL] Communication error recovery failed: 'I' format requires 0 <= number <= 4294967295",
+          "[PASS] Graceful degradation validated"
+        ]
+      },
+      "Performance Benchmarks": {
+        "status": "FAILED",
+        "tests_passed": 3,
+        "tests_failed": 1,
+        "details": [
+          "[FAIL] Payload parsing performance test failed: 'I' format requires 0 <= number <= 4294967295",
+          "[PASS] State normalization performance: 0.005ms per state",
+          "[PASS] Reward calculation performance: 0.003ms per calculation",
+          "[PASS] Memory usage validation: +0.2MB"
+        ]
+      },
+      "Checkpoint Compatibility": {
+        "status": "FAILED",
+        "tests_passed": 2,
+        "tests_failed": 1,
+        "details": [
+          "[FAIL] Model architecture compatibility failed: DuelingDQN.__init__() got an unexpected keyword argument 'frame_channels'",
+          "[PASS] Checkpoint loading compatibility validated",
+          "[PASS] Training state migration validated"
+        ]
+      },
+      "End-to-End Integration": {
+        "status": "FAILED",
+        "tests_passed": 1,
+        "tests_failed": 2,
+        "details": [
+          "[FAIL] Complete pipeline simulation failed: 'I' format requires 0 <= number <= 4294967295",
+          "[PASS] Multi-frame sequence processing validated",
+          "[FAIL] System stress test failed: 'I' format requires 0 <= number <= 4294967295"
+        ]
+      }
+    },
+    "performance_metrics": {
+      "state_normalization_ms": 0.00545191764831543,
+      "reward_calculation_ms": 0.0026056766510009766,
+      "memory_usage_mb": 0.15234375
+    },
+    "critical_failures": [
+      "Lua Memory Reading",
+      "Binary Protocol",
+      "Configuration Switching",
+      "Error Handling",
+      "Performance Benchmarks",
+      "Checkpoint Compatibility",
+      "End-to-End Integration"
+    ],
+    "validation_errors": [],
+    "recommendations": [
+      "Review Lua memory address mappings and payload generation",
+      "Validate WebSocket protocol implementation and payload structure",
+      "Optimize system performance for real-time processing"
+    ],
+    "system_assessment": {
+      "enhanced_features_functional": false,
+      "backward_compatibility_maintained": false,
+      "performance_acceptable": false,
+      "error_handling_robust": false,
+      "integration_complete": false
+    },
+    "next_steps": [
+      "Address any critical failures identified in the test results",
+      "Review performance metrics and optimize if necessary",
+      "Validate system with actual FCEUX integration",
+      "Conduct extended training runs to verify stability",
+      "Monitor system behavior under production conditions"
+    ]
+  },
+  "performance_validation": {
+    "acceptable": false,
+    "metrics": {
+      "cpu_usage": {
+        "cpu_usage_percent": 0,
+        "acceptable": false,
+        "error": "'I' format requires 0 <= number <= 4294967295",
+        "message": "CPU measurement failed: 'I' format requires 0 <= number <= 4294967295"
+      },
+      "memory_usage": {
+        "memory_usage_mb": 0,
+        "acceptable": false,
+        "error": "'I' format requires 0 <= number <= 4294967295",
+        "message": "Memory measurement failed: 'I' format requires 0 <= number <= 4294967295"
+      },
+      "throughput": {
+        "throughput_fps": 0,
+        "acceptable": false,
+        "error": "'I' format requires 0 <= number <= 4294967295",
+        "message": "Throughput measurement failed: 'I' format requires 0 <= number <= 4294967295"
+      },
+      "latency": {
+        "avg_latency_ms": 0,
+        "acceptable": false,
+        "error": "'I' format requires 0 <= number <= 4294967295",
+        "message": "Latency measurement failed: 'I' format requires 0 <= number <= 4294967295"
+      }
+    },
+    "summary": "Performance validation failed"
+  },
+  "system_readiness": {
+    "system_ready": false,
+    "readiness_score": 6.774193548387096,
+    "integration_ready": false,
+    "performance_ready": false,
+    "critical_components_ready": false,
+    "critical_components": {
+      "lua_memory_reading": false,
+      "binary_protocol": false,
+      "state_processing": true,
+      "reward_calculation": true,
+      "end_to_end_integration": false
+    },
+    "integration_success_rate": 67.74193548387096,
+    "assessment": "System is not ready for training - major issues detected"
+  },
+  "overall_status": "FAILED",
+  "recommendations": [
+    "Review Lua memory address mappings and payload generation",
+    "Validate WebSocket protocol implementation and payload structure",
+    "Optimize system performance for real-time processing",
+    "Optimize system performance for real-time processing",
+    "Reduce CPU usage during processing",
+    "Optimize memory usage and prevent memory leaks",
+    "Improve processing throughput to maintain 60 FPS",
+    "Reduce processing latency for real-time performance",
+    "Address critical component failures before training",
+    "Fix issues in lua memory reading",
+    "Fix issues in binary protocol",
+    "Fix issues in end to end integration",
+    "Run extended validation tests before production use",
+    "Monitor system behavior during initial training runs"
+  ]
+}

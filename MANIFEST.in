@@ -1,0 +1,12 @@
+include README.md
+include requirements.txt
+include setup.py
+include pyproject.toml
+recursive-include python *.py
+recursive-include config *.yaml *.yml
+recursive-include lua *.lua
+recursive-include docs *.md
+exclude mario_ai_env
+exclude fceux-2.6.6-win64
+global-exclude *.pyc
+global-exclude __pycache__
