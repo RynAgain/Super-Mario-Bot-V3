@@ -1,3 +1,4 @@
+help with this so whats up with this?
 @echo off
 REM Super Mario Bros AI Training System - Windows Installation Script
 REM This script automates the installation process on Windows systems

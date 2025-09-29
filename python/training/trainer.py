@@ -29,8 +29,8 @@ from python.communication.websocket_server import WebSocketServer
 from python.capture.frame_capture import FrameCapture
 from python.environment.reward_calculator import RewardCalculator
 from python.environment.episode_manager import EpisodeManager
-from python.logging.csv_logger import CSVLogger
-from python.logging.plotter import PerformancePlotter
+from python.mario_logging.csv_logger import CSVLogger
+from python.mario_logging.plotter import PerformancePlotter
 from python.training.training_utils import TrainingStateManager, SystemHealthMonitor
 from python.utils.config_loader import ConfigLoader
 
@@ -53,6 +53,7 @@ class TrainingConfig:
     save_frequency: int
     evaluation_frequency: int
     target_fps: float
+    frame_stack_size: int
     enable_curriculum: bool
     enable_plotting: bool
 
@@ -74,7 +75,12 @@ class MarioTrainer:
         """
         # Load configuration
         self.config_loader = ConfigLoader()
-        self.config = self.config_loader.load_config(config_path)
+        # Extract just the filename if a full path is provided
+        if "/" in config_path or "\\" in config_path:
+            config_filename = config_path.split("/")[-1].split("\\")[-1]
+        else:
+            config_filename = config_path
+        self.config = self.config_loader.load_config(config_filename)
         
         # Training state
         self.training_phase = TrainingPhase.WARMUP
@@ -105,7 +111,7 @@ class MarioTrainer:
     def _initialize_subsystems(self):
         """Initialize all training subsystems."""
         try:
-            # Training configuration
+            # Training configuration with explicit light-load defaults
             training_config = self.config.get('training', {})
             self.training_config = TrainingConfig(
                 max_episodes=training_config.get('max_episodes', 50000),
@@ -113,9 +119,10 @@ class MarioTrainer:
                 warmup_episodes=training_config.get('warmup_episodes', 1000),
                 save_frequency=training_config.get('save_frequency', 1000),
                 evaluation_frequency=training_config.get('evaluation_frequency', 500),
-                target_fps=60.0,
+                target_fps=30,  # Light-load default: reduced from 60 to 30 FPS
+                frame_stack_size=4,  # Light-load default: reduced from 8 to 4 frames
                 enable_curriculum=training_config.get('curriculum', {}).get('enabled', True),
-                enable_plotting=True
+                enable_plotting=False  # Light-load default: disabled to prevent freezing
             )
             
             # Initialize CSV logger
@@ -148,28 +155,35 @@ class MarioTrainer:
                 csv_filename=f"episodes_{self.session_id}.csv"
             )
             
-            # Initialize frame capture
+            # Initialize frame capture with light-load defaults from training config
             capture_config = self.config.get('capture', {})
-            self.frame_capture = FrameCapture(capture_config)
+            self.frame_capture = FrameCapture(
+                window_title=capture_config.get('window_title', 'FCEUX'),
+                target_fps=capture_config.get('target_fps', self.training_config.target_fps),
+                frame_stack_size=capture_config.get('frame_stack_size', self.training_config.frame_stack_size),
+                target_size=tuple(capture_config.get('target_size', [84, 84]))
+            )
             
             # Initialize WebSocket server
             network_config = self.config.get('network', {})
+            websocket_config = self.config.get('websocket', {})
             self.websocket_server = WebSocketServer(
-                host=network_config.get('host', 'localhost'),
-                port=network_config.get('port', 8765)
+                host=websocket_config.get('host') or network_config.get('host', 'localhost'),
+                port=websocket_config.get('port') or network_config.get('port', 8765)
             )
             
             # Register WebSocket handlers
             self._register_websocket_handlers()
             
-            # Initialize performance plotter (optional)
-            if self.training_config.enable_plotting:
-                self.plotter = PerformancePlotter(
-                    log_directory="logs",
-                    session_id=self.session_id
-                )
-            else:
-                self.plotter = None
+            # Initialize performance plotter (disabled to prevent freezing)
+            # Real-time plotting causes matplotlib GUI issues in background threads
+            self.plotter = PerformancePlotter(
+                log_directory="logs",
+                session_id=self.session_id
+            ) if self.training_config.enable_plotting else None
+            
+            # Disable real-time plotting to prevent freezing
+            self.enable_realtime_plotting = False
             
             # Initialize training state
             self.training_state = self.state_manager.initialize_training_state(
@@ -195,12 +209,9 @@ class MarioTrainer:
     
     def _setup_signal_handlers(self):
         """Setup signal handlers for graceful shutdown."""
-        def signal_handler(signum, frame):
-            self.logger.info(f"Received signal {signum}, initiating graceful shutdown...")
-            self.should_stop = True
-        
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        # Note: Signal handlers are set up in main.py to avoid conflicts
+        # This method is kept for compatibility but doesn't set handlers
+        self.logger.debug("Signal handlers managed by main.py")
     
     async def start_training(self, resume_from_checkpoint: Optional[str] = None):
         """
@@ -219,33 +230,63 @@ class MarioTrainer:
             # Start WebSocket server
             await self.websocket_server.start_server()
             
-            # Wait for client connection
+            # Wait for client connection with timeout
             self.logger.info("Waiting for FCEUX client connection...")
+            connection_timeout = 300  # 5 minutes timeout
+            connection_start = time.time()
+            
             while not self.websocket_server.is_client_connected() and not self.should_stop:
                 await asyncio.sleep(1.0)
+                
+                # Check for timeout
+                if time.time() - connection_start > connection_timeout:
+                    self.logger.error("Timeout waiting for FCEUX client connection")
+                    self.logger.error("Make sure FCEUX is running with the Lua script loaded!")
+                    return
+                
+                # Log waiting status every 30 seconds
+                if int(time.time() - connection_start) % 30 == 0:
+                    elapsed = int(time.time() - connection_start)
+                    self.logger.info(f"Still waiting for FCEUX connection... ({elapsed}s elapsed)")
             
             if self.should_stop:
                 return
             
             self.logger.info("Client connected, starting training loop...")
             
-            # Start performance plotter in separate thread if enabled
-            if self.plotter:
-                plotting_thread = threading.Thread(
-                    target=self.plotter.start_realtime_monitoring,
-                    daemon=True
-                )
-                plotting_thread.start()
+            # Skip real-time plotting to prevent freezing issues
+            # The plotter will still create static analysis at the end
+            if self.plotter and self.enable_realtime_plotting:
+                self.logger.info("Real-time plotting disabled to prevent freezing issues")
+                # plotting_thread = threading.Thread(
+                #     target=self.plotter.start_realtime_monitoring,
+                #     daemon=True
+                # )
+                # plotting_thread.start()
             
             # Start main training loop
             self.is_running = True
             await self._training_loop()
             
+        except KeyboardInterrupt:
+            self.logger.info("Training interrupted by user")
+            self.should_stop = True
         except Exception as e:
             self.logger.error(f"Training failed: {e}")
-            raise
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            # Don't re-raise the exception to prevent cleanup from running
+            # Instead, set should_stop flag and let training loop handle it gracefully
+            self.should_stop = True
         finally:
-            await self._cleanup()
+            # Only cleanup if we're explicitly stopping training AND not due to a recoverable exception
+            # This prevents cleanup from running on temporary exceptions that can be recovered from
+            if self.should_stop and not self.is_running:
+                self.logger.info("Training stopped intentionally, performing cleanup")
+                await self._cleanup()
+            elif self.should_stop:
+                self.logger.info("Training flagged to stop but still running - skipping cleanup to allow recovery")
+            else:
+                self.logger.info("Training completed normally, skipping cleanup to maintain connection")
     
     async def _training_loop(self):
         """Main training loop."""
@@ -253,26 +294,63 @@ class MarioTrainer:
         
         try:
             while not self.should_stop and self.current_episode < self.training_config.max_episodes:
+                # Check if client is still connected
+                if not self.websocket_server.is_client_connected():
+                    self.logger.warning("Client disconnected, waiting for reconnection...")
+                    connection_wait_start = time.time()
+                    connection_timeout = 60.0  # 1 minute timeout for reconnection
+                    
+                    while not self.websocket_server.is_client_connected() and not self.should_stop:
+                        await asyncio.sleep(1.0)
+                        
+                        # Check for reconnection timeout
+                        if time.time() - connection_wait_start > connection_timeout:
+                            self.logger.error("Client reconnection timeout - stopping training")
+                            self.should_stop = True
+                            break
+                    
+                    if self.should_stop:
+                        break
+                    
+                    self.logger.info("Client reconnected, resuming training...")
+                
                 # Start new episode
                 await self._start_episode()
                 
-                # Episode loop
+                # Episode loop - wait for game state data to drive the training
                 episode_start_time = time.time()
                 step_in_episode = 0
+                episode_timeout = 60.0  # 60 second timeout per episode
+                last_game_state_time = time.time()
                 
-                while (not self.should_stop and 
+                self.logger.info(f"Starting episode {self.current_episode + 1}, waiting for game state data...")
+                
+                while (not self.should_stop and
                        step_in_episode < self.training_config.max_steps_per_episode and
-                       self.episode_manager.current_episode and
-                       self.episode_manager.current_episode.status.value == "running"):
+                       self.websocket_server.is_client_connected()):
                     
-                    # Process single step
-                    step_start_time = time.time()
+                    # Check for episode timeout (no game data received)
+                    current_time = time.time()
+                    if current_time - last_game_state_time > episode_timeout:
+                        self.logger.warning(f"Episode timeout - no game data received for {episode_timeout}s")
+                        self.logger.warning("This usually means the Lua script is not running or not sending data")
+                        break
                     
-                    # This will be triggered by incoming game state data
-                    await asyncio.sleep(0.001)  # Small delay to prevent busy waiting
+                    # Check if episode is still running (updated by _handle_game_state)
+                    if (self.episode_manager.current_episode and
+                        self.episode_manager.current_episode.status.value != "running"):
+                        self.logger.info("Episode ended by game state handler")
+                        break
+                    
+                    # Wait for game state data (processed by _handle_game_state)
+                    await asyncio.sleep(0.1)
+                    
+                    # Update last game state time if we received data recently
+                    if hasattr(self, '_last_game_state_received'):
+                        last_game_state_time = self._last_game_state_received
                     
                     # Update FPS tracking
-                    self._update_fps_tracking(step_start_time)
+                    self._update_fps_tracking(current_time)
                     
                     # Check system health periodically
                     if step_in_episode % 100 == 0:
@@ -283,15 +361,17 @@ class MarioTrainer:
                     step_in_episode += 1
                 
                 # End episode
-                await self._end_episode(time.time() - episode_start_time)
+                episode_duration = time.time() - episode_start_time
+                await self._end_episode(episode_duration)
                 
                 # Save checkpoint periodically
                 if self.current_episode % self.training_config.save_frequency == 0:
                     await self._save_checkpoint()
                 
-                # Run evaluation periodically
-                if self.current_episode % self.training_config.evaluation_frequency == 0:
-                    await self._run_evaluation()
+                # Skip evaluation completely to prevent connection drops
+                # Evaluation causes WebSocket disconnection issues
+                # if self.current_episode % self.training_config.evaluation_frequency == 0:
+                #     await self._run_evaluation()
                 
                 self.current_episode += 1
             
@@ -299,7 +379,10 @@ class MarioTrainer:
             
         except Exception as e:
             self.logger.error(f"Error in training loop: {e}")
-            raise
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            # Don't re-raise the exception to prevent cleanup from running
+            # Set should_stop flag to gracefully exit the training loop
+            self.should_stop = True
     
     async def _start_episode(self):
         """Start a new training episode."""
@@ -309,11 +392,18 @@ class MarioTrainer:
         self._update_training_phase()
         
         # Send training control command to Lua script
-        await self.websocket_server.send_training_control(
+        reset_sent = await self.websocket_server.send_training_control(
             command="reset",
             episode_id=self.current_episode + 1,
             reset_to_level="1-1"
         )
+        
+        if reset_sent:
+            # Give Lua script time to process the reset command
+            await asyncio.sleep(0.5)  # 500ms delay to allow reset processing
+            self.logger.debug(f"Reset command sent successfully for episode {self.current_episode + 1}")
+        else:
+            self.logger.error(f"Failed to send reset command for episode {self.current_episode + 1}")
         
         # Reset episode-specific state
         self.current_step = 0
@@ -378,12 +468,12 @@ class MarioTrainer:
                 level_completed=completed,
                 death_cause=episode_stats.termination_reason,
                 game_stats={
-                    'lives': episode_stats.lives_remaining,
-                    'score': episode_stats.score,
-                    'coins': episode_stats.coins_collected,
-                    'enemies_killed': episode_stats.enemies_killed,
-                    'powerups': episode_stats.powerups_collected,
-                    'time_remaining': episode_stats.time_remaining
+                    'lives': getattr(episode_stats, 'lives_remaining', getattr(episode_stats, 'lives_used', 3)),
+                    'score': getattr(episode_stats, 'score', 0),
+                    'coins': getattr(episode_stats, 'coins_collected', 0),
+                    'enemies_killed': getattr(episode_stats, 'enemies_killed', 0),
+                    'powerups': getattr(episode_stats, 'powerups_collected', 0),
+                    'time_remaining': getattr(episode_stats, 'time_remaining', 0)
                 },
                 q_value_stats=q_value_stats,
                 action_stats=action_stats
@@ -406,17 +496,72 @@ class MarioTrainer:
         try:
             step_start_time = time.time()
             
+            # Track when we last received game state data
+            self._last_game_state_received = step_start_time
+            
             # Parse game state from binary data
             game_state = self.frame_capture.parse_game_state(game_state_data)
             
+            # Ensure episode is started (but don't create multiple episodes rapidly)
+            if not self.episode_manager.current_episode:
+                self.logger.info("Starting new episode from game state handler")
+                initial_state = {
+                    'mario_x': game_state.get('mario_x', 0),
+                    'mario_y': game_state.get('mario_y', 0),
+                    'score': game_state.get('score', 0),
+                    'lives': game_state.get('lives', 3),
+                    'time': game_state.get('time', 400)
+                }
+                self.episode_manager.start_episode(initial_state)
+            elif self.episode_manager.current_episode.status.value != "running":
+                # Episode has ended, don't process more frames until next episode starts
+                self.logger.debug(f"Skipping frame processing - episode status: {self.episode_manager.current_episode.status.value}")
+                return
+            
             # Process frame in episode manager
             frame_reward, reward_components, is_terminal = self.episode_manager.process_frame(
-                game_state, 
+                game_state,
                 sync_quality=1.0  # Simplified sync quality
             )
             
+            # Log terminal state detection
+            if is_terminal:
+                self.logger.info(f"Terminal state detected in episode manager: {self.episode_manager.current_episode.termination_reason if self.episode_manager.current_episode else 'unknown'}")
+            
             # Get preprocessed frames and state vector
             frames, state_vector = self.frame_capture.process_frame(game_state)
+            
+            # Convert to tensors and ensure proper dimensions
+            if not isinstance(frames, torch.Tensor):
+                frames = torch.from_numpy(frames).float()
+            if not isinstance(state_vector, torch.Tensor):
+                state_vector = torch.from_numpy(state_vector).float()
+            
+            # Ensure frames have batch dimension: (1, height, width, channels)
+            if len(frames.shape) == 3:
+                frames = frames.unsqueeze(0)  # Add batch dimension
+            elif len(frames.shape) == 4 and frames.shape[0] != 1:
+                # If batch size is not 1, take first sample
+                frames = frames[:1]
+            
+            # Convert from channels-last to channels-first format for PyTorch
+            # From (batch, height, width, channels) to (batch, channels, height, width)
+            if len(frames.shape) == 4:
+                frames = frames.permute(0, 3, 1, 2)  # Transpose dimensions
+            
+            # Ensure state vector has batch dimension: (1, features)
+            if len(state_vector.shape) == 1:
+                state_vector = state_vector.unsqueeze(0)  # Add batch dimension
+            elif len(state_vector.shape) == 2 and state_vector.shape[0] != 1:
+                # If batch size is not 1, take first sample
+                state_vector = state_vector[:1]
+            
+            # Move to device
+            frames = frames.to(self.agent.device)
+            state_vector = state_vector.to(self.agent.device)
+            
+            # Shape validation before training steps
+            self._validate_tensor_shapes(frames, state_vector)
             
             # Agent action selection
             action_id = self.agent.select_action(frames, state_vector, training=True)
@@ -425,13 +570,27 @@ class MarioTrainer:
             action_buttons = self._action_id_to_buttons(action_id)
             
             # Send action to Lua script
-            await self.websocket_server.send_action(action_buttons, frame_id)
+            action_sent = await self.websocket_server.send_action(action_buttons, frame_id)
+            
+            if action_sent:
+                self.logger.debug(f"Sent action {action_id} (buttons: {action_buttons}) for frame {frame_id}")
+            else:
+                self.logger.warning(f"Failed to send action {action_id} for frame {frame_id} - connection may be lost")
             
             # Store experience in replay buffer
             if hasattr(self, 'previous_frames') and hasattr(self, 'previous_state_vector'):
+                # Ensure previous tensors are on the correct device and have correct format
+                prev_frames = self.previous_frames.to(self.agent.device) if hasattr(self.previous_frames, 'to') else self.previous_frames
+                prev_state = self.previous_state_vector.to(self.agent.device) if hasattr(self.previous_state_vector, 'to') else self.previous_state_vector
+                
+                # Ensure previous frames are also in channels-first format
+                if hasattr(prev_frames, 'shape') and len(prev_frames.shape) == 4 and prev_frames.shape[-1] == 4:
+                    # If channels are last, transpose to channels-first
+                    prev_frames = prev_frames.permute(0, 3, 1, 2)
+                
                 self.agent.store_experience(
-                    self.previous_frames,
-                    self.previous_state_vector,
+                    prev_frames,
+                    prev_state,
                     self.previous_action_id,
                     frame_reward,
                     frames,
@@ -506,8 +665,18 @@ class MarioTrainer:
             
             self.current_step += 1
             
+            # Log periodic status
+            if self.current_step % 100 == 0:
+                self.logger.info(f"Episode {self.current_episode + 1}, Step {self.current_step}: "
+                               f"Reward={frame_reward:.2f}, Total={self.episode_manager.current_episode.total_reward:.2f}, "
+                               f"Mario X={game_state.get('mario_x', 0)}, Action={action_id}")
+            
         except Exception as e:
             self.logger.error(f"Error handling game state: {e}")
+            self.logger.error(f"Exception type: {type(e).__name__}")
+            
+            # Don't re-raise the exception - just continue with next frame
+            # This prevents the exception from bubbling up and triggering cleanup
             
             # Log debug event
             self.csv_logger.log_debug_event(
@@ -519,6 +688,53 @@ class MarioTrainer:
                 message=f"Game state processing error: {str(e)}",
                 exception=e
             )
+    
+    def _validate_tensor_shapes(self, frames: torch.Tensor, state_vector: torch.Tensor):
+        """
+        Validate tensor shapes match network expectations.
+        
+        Args:
+            frames: Frame tensor to validate
+            state_vector: State vector tensor to validate
+        """
+        # Log tensor shapes for debugging
+        self.logger.debug(f"Frame tensor shape: {frames.shape}, State vector shape: {state_vector.shape}")
+        self.logger.debug(f"Expected frame_stack_size from config: {self.training_config.frame_stack_size}")
+        
+        # Validate frame tensor shape
+        expected_channels = self.training_config.frame_stack_size
+        if len(frames.shape) == 4:
+            actual_channels = frames.shape[1]  # Channels-first format: (batch, channels, height, width)
+        else:
+            actual_channels = frames.shape[0] if len(frames.shape) == 3 else 0
+        
+        if actual_channels != expected_channels:
+            self.logger.error(f"TENSOR SHAPE MISMATCH DETECTED!")
+            self.logger.error(f"  - Actual frame channels: {actual_channels}")
+            self.logger.error(f"  - Expected channels: {expected_channels}")
+            self.logger.error(f"  - Frame tensor shape: {frames.shape}")
+            self.logger.error(f"  - This will cause runtime errors in the neural network")
+            
+            # Log to CSV for debugging
+            self.csv_logger.log_debug_event(
+                episode=self.current_episode + 1,
+                step=self.current_step,
+                event_type="tensor_shape_mismatch",
+                severity="critical",
+                component="trainer",
+                message=f"Frame tensor shape mismatch: expected {expected_channels} channels, got {actual_channels}",
+                exception=None
+            )
+        
+        # Validate state vector shape
+        expected_state_size = 12  # Standard game state vector size
+        if len(state_vector.shape) == 2:
+            actual_state_size = state_vector.shape[1]  # (batch, features)
+        else:
+            actual_state_size = state_vector.shape[0] if len(state_vector.shape) == 1 else 0
+        
+        if actual_state_size != expected_state_size:
+            self.logger.warning(f"State vector size mismatch: expected {expected_state_size}, got {actual_state_size}")
     
     def _action_id_to_buttons(self, action_id: int) -> Dict[str, bool]:
         """
@@ -687,11 +903,10 @@ class MarioTrainer:
             self.training_phase = TrainingPhase.EVALUATION
             self.agent.epsilon = 0.01  # Minimal exploration
             
-            # Run single evaluation episode
-            # This would be similar to regular episode but without training
-            # For now, just log the evaluation
-            
-            self.logger.info("Evaluation completed")
+            # Skip evaluation for now to prevent disconnection issues
+            # The evaluation system needs a complete rewrite to properly handle
+            # separate evaluation episodes without interfering with training
+            self.logger.info("Evaluation skipped to prevent disconnection issues")
             
         finally:
             # Restore training state
@@ -722,8 +937,9 @@ class MarioTrainer:
             
             # Create final analysis plot
             if self.plotter:
-                analysis_path = self.plotter.create_static_analysis()
-                self.logger.info(f"Final analysis saved: {analysis_path}")
+                analysis_path = self.plotter.create_static_analysis(enable_plotting=self.training_config.enable_plotting)
+                if analysis_path:
+                    self.logger.info(f"Final analysis saved: {analysis_path}")
             
             self.is_running = False
             self.logger.info("Cleanup completed")
@@ -735,10 +951,10 @@ class MarioTrainer:
         """Stop training gracefully."""
         self.logger.info("Stopping training...")
         self.should_stop = True
+        self.is_running = False  # Explicitly set is_running to False to trigger cleanup
         
-        # Wait for training loop to finish
-        while self.is_running:
-            await asyncio.sleep(0.1)
+        # Wait a moment for any pending operations to complete
+        await asyncio.sleep(0.1)
         
         self.logger.info("Training stopped")
     

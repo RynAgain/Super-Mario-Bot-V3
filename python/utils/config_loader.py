@@ -78,7 +78,7 @@ class ConfigLoader:
         
         return self.config
     
-    def load_config_file(self, filename: str) -> Dict[str, Any]:
+    def load_config(self, filename: str) -> Dict[str, Any]:
         """
         Load a specific configuration file.
         
@@ -114,6 +114,12 @@ class ConfigLoader:
         
         # Validate network configuration
         self._validate_network_config()
+        
+        # Validate enhanced features configuration
+        self._validate_enhanced_features_config()
+        
+        # Validate enhanced communication configuration
+        self._validate_enhanced_communication_config()
         
         # Validate game configuration
         self._validate_game_config()
@@ -171,6 +177,109 @@ class ConfigLoader:
         
         if len(network_config['frame_size']) != 2:
             raise ValueError("Frame size must be a 2-element list [height, width]")
+        
+        # Validate enhanced features configuration if present
+        enhanced_features = network_config.get('enhanced_features', False)
+        if enhanced_features:
+            state_vector_size = network_config.get('state_vector_size', 12)
+            if state_vector_size not in [12, 20]:
+                raise ValueError("State vector size must be 12 (basic) or 20 (enhanced)")
+    
+    def _validate_enhanced_features_config(self):
+        """Validate enhanced features configuration parameters."""
+        enhanced_config = self.config.get('enhanced_features', {})
+        
+        if not enhanced_config:
+            return  # Enhanced features not configured
+        
+        # Validate feature categories
+        categories = enhanced_config.get('categories', {})
+        if categories:
+            expected_categories = [
+                'enemy_threat_assessment', 'powerup_detection',
+                'environmental_awareness', 'enhanced_mario_state'
+            ]
+            
+            for category in expected_categories:
+                if category in categories:
+                    feature_count = categories[category]
+                    if not isinstance(feature_count, int) or feature_count < 0:
+                        raise ValueError(f"Feature count for {category} must be a non-negative integer")
+        
+        # Validate architecture adjustments
+        arch_adjustments = enhanced_config.get('architecture_adjustments', {})
+        if arch_adjustments:
+            fusion_size = arch_adjustments.get('fusion_hidden_size_20')
+            if fusion_size is not None and (not isinstance(fusion_size, int) or fusion_size <= 0):
+                raise ValueError("Fusion hidden size must be a positive integer")
+        
+        # Validate validation settings
+        validation_settings = enhanced_config.get('validation', {})
+        if validation_settings:
+            for setting in ['check_payload_size', 'check_feature_ranges', 'log_feature_stats']:
+                if setting in validation_settings and not isinstance(validation_settings[setting], bool):
+                    raise ValueError(f"Validation setting {setting} must be a boolean")
+    
+    def _validate_enhanced_communication_config(self):
+        """Validate enhanced communication configuration parameters."""
+        comm_config = self.config.get('enhanced_communication', {})
+        
+        if not comm_config:
+            return  # Enhanced communication not configured
+        
+        # Validate protocol version
+        protocol_version = comm_config.get('protocol_version')
+        if protocol_version and not isinstance(protocol_version, str):
+            raise ValueError("Protocol version must be a string")
+        
+        # Validate payload size
+        payload_size = comm_config.get('payload_size')
+        if payload_size is not None:
+            if not isinstance(payload_size, int) or payload_size <= 0:
+                raise ValueError("Payload size must be a positive integer")
+            if payload_size not in [80, 128]:  # Common payload sizes
+                self.logger.warning(f"Unusual payload size: {payload_size} bytes")
+        
+        # Validate binary parsing settings
+        binary_parsing = comm_config.get('binary_parsing', {})
+        if binary_parsing:
+            bool_settings = ['enabled', 'validation_enabled', 'strict_mode']
+            for setting in bool_settings:
+                if setting in binary_parsing and not isinstance(binary_parsing[setting], bool):
+                    raise ValueError(f"Binary parsing setting {setting} must be a boolean")
+        
+        # Validate reward calculation settings
+        reward_calc = comm_config.get('reward_calculation', {})
+        if reward_calc:
+            if 'enabled' in reward_calc and not isinstance(reward_calc['enabled'], bool):
+                raise ValueError("Reward calculation enabled setting must be a boolean")
+            
+            # Validate feature weights
+            feature_weights = reward_calc.get('feature_weights', {})
+            if feature_weights:
+                for weight_name, weight_value in feature_weights.items():
+                    if not isinstance(weight_value, (int, float)) or weight_value < 0:
+                        raise ValueError(f"Feature weight {weight_name} must be a non-negative number")
+        
+        # Validate error handling settings
+        error_handling = comm_config.get('error_handling', {})
+        if error_handling:
+            bool_settings = ['drop_invalid_frames', 'log_validation_warnings', 'log_parsing_errors']
+            for setting in bool_settings:
+                if setting in error_handling and not isinstance(error_handling[setting], bool):
+                    raise ValueError(f"Error handling setting {setting} must be a boolean")
+            
+            max_errors = error_handling.get('max_consecutive_errors')
+            if max_errors is not None and (not isinstance(max_errors, int) or max_errors <= 0):
+                raise ValueError("Max consecutive errors must be a positive integer")
+        
+        # Validate monitoring settings
+        monitoring = comm_config.get('monitoring', {})
+        if monitoring:
+            bool_settings = ['track_statistics', 'log_performance_metrics', 'reset_stats_on_episode']
+            for setting in bool_settings:
+                if setting in monitoring and not isinstance(monitoring[setting], bool):
+                    raise ValueError(f"Monitoring setting {setting} must be a boolean")
     
     def _validate_game_config(self):
         """Validate game configuration parameters."""

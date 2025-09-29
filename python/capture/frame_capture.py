@@ -10,7 +10,7 @@ import numpy as np
 import time
 import threading
 import logging
-from typing import Optional, Tuple, Callable, List
+from typing import Optional, Tuple, Callable, List, Dict, Any
 from collections import deque
 import win32gui
 import win32ui
@@ -195,11 +195,29 @@ class FramePreprocessor:
             return np.zeros((*self.target_size, 1), dtype=np.float32)
         
         try:
-            # Convert to grayscale
+            # Convert to grayscale based on input format
             if len(frame.shape) == 3:
-                gray_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-            else:
+                # Multi-channel image
+                if frame.shape[2] == 3:
+                    # RGB image
+                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                elif frame.shape[2] == 4:
+                    # RGBA image
+                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2GRAY)
+                else:
+                    # Unknown format, take first channel
+                    gray_frame = frame[:, :, 0]
+            elif len(frame.shape) == 2:
+                # Already grayscale
                 gray_frame = frame
+            else:
+                # Invalid shape, create empty frame
+                self.logger.warning(f"Invalid frame shape: {frame.shape}")
+                return np.zeros((*self.target_size, 1), dtype=np.float32)
+            
+            # Ensure grayscale frame is 2D
+            if len(gray_frame.shape) > 2:
+                gray_frame = gray_frame[:, :, 0]
             
             # Resize to target size
             resized_frame = cv2.resize(gray_frame, self.target_size, interpolation=cv2.INTER_AREA)
@@ -214,6 +232,8 @@ class FramePreprocessor:
             
         except Exception as e:
             self.logger.error(f"Frame preprocessing failed: {e}")
+            self.logger.error(f"Frame shape: {frame.shape if frame is not None else 'None'}")
+            self.logger.error(f"Frame dtype: {frame.dtype if frame is not None else 'None'}")
             return np.zeros((*self.target_size, 1), dtype=np.float32)
     
     def preprocess_frame_stack(self, frames: List[np.ndarray]) -> np.ndarray:
@@ -248,10 +268,10 @@ class FrameCapture:
     preprocessing, and synchronization.
     """
     
-    def __init__(self, 
+    def __init__(self,
                  window_title: str = "FCEUX",
-                 target_fps: int = 60,
-                 frame_stack_size: int = 8,
+                 target_fps: int = 30,         # ↓ from 60
+                 frame_stack_size: int = 4,    # ↓ from 8
                  target_size: Tuple[int, int] = (84, 84)):
         """
         Initialize frame capture system.
@@ -262,8 +282,15 @@ class FrameCapture:
             frame_stack_size: Number of frames to stack
             target_size: Target frame size for neural network
         """
-        self.window_capture = WindowCapture(window_title)
         self.preprocessor = FramePreprocessor(target_size)
+        try:
+            self.window_capture = WindowCapture(window_title)
+            self._use_mss = False
+        except Exception:
+            # Fallback to monitor/region grab to avoid GDI/occlusion issues
+            from mss import mss
+            self._mss = mss()
+            self._use_mss = True
         
         self.target_fps = target_fps
         self.frame_interval = 1.0 / target_fps
@@ -395,17 +422,36 @@ class FrameCapture:
         Returns:
             Stacked frames with shape (height, width, stack_size)
         """
-        frames = list(self.processed_frame_buffer)
-        
-        # Pad with zeros if not enough frames
-        while len(frames) < self.frame_stack_size:
-            frames.insert(0, np.zeros((*self.preprocessor.target_size, 1), dtype=np.float32))
-        
-        # Take only the most recent frames
-        frames = frames[-self.frame_stack_size:]
-        
-        # Stack frames
-        return self.preprocessor.preprocess_frame_stack(frames)
+        try:
+            frames = list(self.processed_frame_buffer)
+            
+            # Pad with zeros if not enough frames
+            while len(frames) < self.frame_stack_size:
+                frames.insert(0, np.zeros((*self.preprocessor.target_size, 1), dtype=np.float32))
+            
+            # Take only the most recent frames
+            frames = frames[-self.frame_stack_size:]
+            
+            # Validate frames before stacking
+            valid_frames = []
+            for frame in frames:
+                if isinstance(frame, np.ndarray) and frame.size > 0:
+                    valid_frames.append(frame)
+                else:
+                    # Add default frame if invalid
+                    valid_frames.append(np.zeros((*self.preprocessor.target_size, 1), dtype=np.float32))
+            
+            # Stack frames
+            if valid_frames:
+                return self.preprocessor.preprocess_frame_stack(valid_frames)
+            else:
+                # Return default frame stack
+                return np.zeros((*self.preprocessor.target_size, self.frame_stack_size), dtype=np.float32)
+                
+        except Exception as e:
+            self.logger.error(f"Error in get_frame_stack: {e}")
+            # Return default frame stack on error
+            return np.zeros((*self.preprocessor.target_size, self.frame_stack_size), dtype=np.float32)
     
     def get_raw_frame_stack(self) -> List[np.ndarray]:
         """Get raw frame stack for debugging."""
@@ -427,6 +473,236 @@ class FrameCapture:
         })
         
         return stats
+    
+    def parse_game_state(self, game_state_data: bytes) -> Dict[str, Any]:
+        """
+        Parse binary game state data from Lua script with robust error handling.
+        
+        Args:
+            game_state_data: Binary game state data from WebSocket
+            
+        Returns:
+            Parsed game state dictionary
+        """
+        import struct
+        
+        # Define struct formats
+        HEADER_FMT = struct.Struct('<BIHB')        # 8 bytes
+        MARIO_FMT  = struct.Struct('<HHbbBBBBBBBB')  # 16 bytes
+        ENEMY_COUNT = 8
+        ENEMY_BYTES_PER = 4
+        ENEMY_TOTAL = ENEMY_COUNT * ENEMY_BYTES_PER  # 32 bytes
+        LEVEL_BLOCK_SIZE = 64
+        GAMEVARS_BLOCK_SIZE = 16
+        EXPECTED_TOTAL = HEADER_FMT.size + MARIO_FMT.size + ENEMY_TOTAL + LEVEL_BLOCK_SIZE + GAMEVARS_BLOCK_SIZE  # 136
+        
+        def _hexdump(data: bytes, limit: int = 64) -> str:
+            return ' '.join(f'{b:02x}' for b in data[:limit])
+        
+        try:
+            total_len = len(game_state_data)
+            self.logger.debug(f"[GS] total={total_len} (expected {EXPECTED_TOTAL}). Hex head: {_hexdump(game_state_data, 32)}")
+
+            if total_len < HEADER_FMT.size + MARIO_FMT.size:
+                self.logger.warning(f"[GS] Too short for header+Mario: {total_len} bytes")
+                return self._get_default_game_state()
+
+            # ----- Header -----
+            header = game_state_data[0:HEADER_FMT.size]
+            try:
+                message_type, frame_id, data_length, checksum = HEADER_FMT.unpack(header)
+            except struct.error as e:
+                self.logger.warning(f"[GS] Header unpack failed: {e}")
+                return self._get_default_game_state()
+
+            # Use actual payload length instead of trusting header data_length
+            payload_len = total_len - HEADER_FMT.size
+            if data_length != payload_len:
+                self.logger.debug(f"[GS] Header data_length={data_length} vs actual payload={payload_len} - using actual")
+
+            # ----- Mario (16B) -----
+            off = HEADER_FMT.size
+            mario_end = off + MARIO_FMT.size
+            if total_len < mario_end:
+                self.logger.warning(f"[GS] Missing Mario block: need {MARIO_FMT.size}, have {total_len - off}")
+                return self._get_default_game_state()
+
+            try:
+                mario_values = MARIO_FMT.unpack(game_state_data[off:mario_end])
+            except struct.error as e:
+                self.logger.error(f"[GS] Mario unpack failed: {e}")
+                return self._get_default_game_state()
+
+            off = mario_end
+
+            # ----- Enemy (32B) -----
+            enemy_end = off + ENEMY_TOTAL
+            enemies_raw = b''
+            if total_len >= enemy_end:
+                enemies_raw = game_state_data[off:enemy_end]
+                off = enemy_end
+            else:
+                # Partial or missing enemy data; skip but note it
+                missing = enemy_end - total_len
+                self.logger.debug(f"[GS] Enemy data short by {missing} bytes; proceeding with zeros")
+                # we won't use enemies in state_vector here; fine to proceed
+
+            # ----- Tail (level + game vars) -----
+            tail_len = total_len - off
+            # We *intend* 64 + 16 = 80 bytes, but we may have fewer (your current 70)
+            level_available = min(tail_len, LEVEL_BLOCK_SIZE)
+            gv_available = max(0, tail_len - LEVEL_BLOCK_SIZE)
+            gv_available = min(gv_available, GAMEVARS_BLOCK_SIZE)
+
+            level_block = game_state_data[off: off + level_available]
+            off += level_available
+            gamevars_block = game_state_data[off: off + gv_available]
+            off += gv_available
+
+            self.logger.debug(
+                f"[GS] Segments: header=8, mario=16, enemy=({len(enemies_raw)}) "
+                f"level=({len(level_block)}/{LEVEL_BLOCK_SIZE}), gamevars=({len(gamevars_block)}/{GAMEVARS_BLOCK_SIZE})"
+            )
+
+            # ---- Interpret Mario values ----
+            # <HHbbBBBBBBBB
+            # x_pos_world, y_pos_level, x_vel(int8), y_vel(int8),
+            # power, anim, dir, state, lives, invinc, rsv1, rsv2
+            mx, my = mario_values[0], mario_values[1]
+            mstate = mario_values[7]
+            mlives = mario_values[8]
+            mpower = mario_values[4]
+
+            # ---- Interpret Level block (if present) ----
+            # camera_x(2) + world(1) + level(1) + score_digits(4B) + time(4) + coins(2) = 14B minimal
+            world = 1
+            level = 1
+            score = 0
+            coins = 0
+            time_rem = 400
+
+            if len(level_block) >= 14:
+                try:
+                    # camera_x(2) + world(1) + level(1) + score digits (4B) + time(4B) + coins(2B)
+                    # Use staged reads to avoid struct issues
+                    camera_x = struct.unpack_from('<H', level_block, 0)[0]
+                    world     = level_block[2]
+                    level     = level_block[3]
+                    s100k     = level_block[4]
+                    s10k      = level_block[5]
+                    s1k       = level_block[6]
+                    s100      = level_block[7]
+                    time_rem  = struct.unpack_from('<I', level_block, 8)[0]
+                    coins     = struct.unpack_from('<H', level_block, 12)[0]
+                    score     = (s100k * 100000) + (s10k * 10000) + (s1k * 1000) + (s100 * 100)
+                except Exception as e:
+                    self.logger.warning(f"[GS] Level parse failed ({len(level_block)}B): {e}; using defaults")
+
+            # ---- Optional: checksum verify ----
+            # Sum checksum to match Lua script: sum(payload) % 256
+            calc_checksum = (sum(game_state_data[HEADER_FMT.size:]) % 256) if payload_len > 0 else 0
+            if calc_checksum != checksum:
+                self.logger.debug(f"[GS] Checksum mismatch: header={checksum} calc={calc_checksum}")
+
+            # Debug: Log parsed Mario position values
+            self.logger.debug(f"PARSED: mario_x={int(mx)}, mario_y={int(my)}, lives={int(mlives)}, score={int(score)}")
+            
+            return {
+                'mario_x': int(mx),
+                'mario_y': int(my),
+                'mario_state': int(mstate),
+                'world': int(world),
+                'level': int(level),
+                'lives': int(mlives),
+                'score': int(score),
+                'coins': int(coins),
+                'time': int(time_rem),
+                'powerup': int(mpower),
+                'timestamp': time.time(),
+                # Optional debug fields:
+                '_raw_total_len': total_len,
+                '_payload_len': payload_len,
+            }
+
+        except Exception as e:
+            self.logger.error(f"[GS] Fatal parse error: {e}")
+            self.logger.error(f"[GS] Total len: {len(game_state_data)}; Hex head: {_hexdump(game_state_data, 32)}")
+            return self._get_default_game_state()
+    
+    def _get_default_game_state(self) -> Dict[str, Any]:
+        """Get default game state when parsing fails."""
+        return {
+            'mario_x': 0,
+            'mario_y': 0,
+            'mario_state': 0,
+            'world': 1,
+            'level': 1,
+            'lives': 3,
+            'score': 0,
+            'coins': 0,
+            'time': 400,
+            'powerup': 0,
+            'timestamp': time.time()
+        }
+    
+    def process_frame(self, game_state: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Process game state and return frames and state vector for neural network.
+        
+        Args:
+            game_state: Parsed game state dictionary
+            
+        Returns:
+            Tuple of (processed_frames, state_vector)
+        """
+        try:
+            # Get current frame stack
+            frames = self.get_frame_stack()
+            
+            # Ensure frames have correct shape: (height, width, channels)
+            if len(frames.shape) == 4 and frames.shape[0] == 1:
+                # Remove batch dimension if present
+                frames = frames.squeeze(0)
+            elif len(frames.shape) == 2:
+                # Add channel dimension if missing
+                frames = np.expand_dims(frames, axis=-1)
+            
+            # Ensure we have the expected shape
+            expected_shape = (*self.preprocessor.target_size, self.frame_stack_size)
+            if frames.shape != expected_shape:
+                self.logger.warning(f"Frame shape mismatch: got {frames.shape}, expected {expected_shape}")
+                frames = np.zeros(expected_shape, dtype=np.float32)
+            
+            # Create state vector from game state (12 elements to match DQN model)
+            state_vector = np.array([
+                game_state.get('mario_x', 0) / 3000.0,  # Normalize position
+                game_state.get('mario_y', 0) / 240.0,   # Normalize Y position
+                game_state.get('mario_state', 0) / 10.0, # Normalize state
+                game_state.get('lives', 3) / 10.0,      # Normalize lives
+                game_state.get('powerup', 0) / 3.0,     # Normalize powerup
+                game_state.get('time', 400) / 400.0,    # Normalize time
+                game_state.get('coins', 0) / 100.0,     # Normalize coins
+                game_state.get('score', 0) / 1000000.0, # Normalize score
+                # Additional features to reach 12 elements
+                float(game_state.get('world', 1) - 1) / 7.0,  # World (0-7 normalized)
+                float(game_state.get('level', 1) - 1) / 3.0,  # Level (0-3 normalized)
+                0.0,  # Reserved feature 1
+                0.0   # Reserved feature 2
+            ], dtype=np.float32)
+            
+            # Ensure state vector has correct shape
+            if len(state_vector.shape) != 1:
+                state_vector = state_vector.flatten()
+            
+            return frames, state_vector
+            
+        except Exception as e:
+            self.logger.error(f"Failed to process frame: {e}")
+            self.logger.error(f"Game state keys: {list(game_state.keys()) if game_state else 'None'}")
+            # Return default values
+            default_frames = np.zeros((*self.preprocessor.target_size, self.frame_stack_size), dtype=np.float32)
+            default_state = np.zeros(12, dtype=np.float32)
+            return default_frames, default_state
     
     def reset_stats(self):
         """Reset capture statistics."""

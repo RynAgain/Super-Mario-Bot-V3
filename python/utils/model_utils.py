@@ -19,6 +19,38 @@ from typing import Dict, Any, Optional, Union, List, Tuple
 import logging
 from datetime import datetime
 import pickle
+import warnings
+
+# Import Windows-specific optimizations
+try:
+    from .windows_optimization import WindowsPyTorchOptimizer, optimize_for_windows, get_optimized_scaler
+    _windows_optimizer = WindowsPyTorchOptimizer()
+    _windows_optimizations_available = True
+except ImportError:
+    _windows_optimizer = None
+    _windows_optimizations_available = False
+
+# Configure PyTorch for optimal Windows performance
+def _configure_pytorch_for_windows():
+    """Configure PyTorch for optimal Windows performance without Triton."""
+    try:
+        import triton
+        # Triton is available (Linux), use it
+        torch.set_float32_matmul_precision('high')
+        return True, "triton"
+    except ImportError:
+        # Triton not available (Windows), use Windows optimizations
+        warnings.filterwarnings("ignore", message=".*triton.*")
+        warnings.filterwarnings("ignore", message=".*TensorFloat32.*")
+        os.environ.setdefault('TORCHDYNAMO_VERBOSE', '0')
+        
+        if _windows_optimizations_available:
+            return True, "windows"
+        else:
+            return False, "fallback"
+
+# Configure on import
+_optimization_available, _optimization_type = _configure_pytorch_for_windows()
 
 
 class ModelManager:
@@ -373,11 +405,11 @@ class ModelOptimizer:
         compile_mode: str = "reduce-overhead"
     ) -> nn.Module:
         """
-        Apply optimizations to model.
+        Apply optimizations to model with Windows-specific alternatives to Triton.
         
         Args:
             model: Model to optimize
-            compile_model: Whether to use torch.compile
+            compile_model: Whether to use torch.compile or Windows optimizations
             mixed_precision: Whether to enable mixed precision
             compile_mode: Compilation mode for torch.compile
             
@@ -387,13 +419,39 @@ class ModelOptimizer:
         # Move to device
         model = self.device_manager.to_device(model)
         
-        # Apply torch.compile if available and requested
-        if compile_model and hasattr(torch, 'compile'):
+        # Apply optimizations based on available backend
+        if _optimization_type == "triton" and compile_model and hasattr(torch, 'compile'):
+            # Linux with Triton - use torch.compile
             try:
                 model = torch.compile(model, mode=compile_mode)
-                self.logger.info(f"Model compiled with mode: {compile_mode}")
+                self.logger.info(f"Model compiled with Triton backend: {compile_mode}")
             except Exception as e:
-                self.logger.warning(f"Model compilation failed: {e}")
+                self.logger.warning(f"Triton compilation failed: {e}")
+                # Fallback to Windows optimizations
+                if _windows_optimizations_available:
+                    model = _windows_optimizer.optimize_model(model, self.device_manager.device)
+                    self.logger.info("Applied Windows optimizations as fallback")
+        
+        elif _optimization_type == "windows" and _windows_optimizations_available:
+            # Windows - use Windows-specific optimizations
+            model = _windows_optimizer.optimize_model(model, self.device_manager.device)
+            self.logger.info("Applied Windows-specific PyTorch optimizations")
+            
+            # Log performance report
+            report = _windows_optimizer.get_performance_report()
+            self.logger.info(f"Windows optimization report:\n{report}")
+        
+        else:
+            # Fallback mode
+            self.logger.info("Using standard PyTorch without advanced optimizations")
+            if self.device_manager.device.type == "cuda":
+                try:
+                    torch.backends.cuda.matmul.allow_tf32 = True
+                    torch.backends.cudnn.allow_tf32 = True
+                    torch.set_float32_matmul_precision('high')
+                    self.logger.info("Enabled basic CUDA optimizations")
+                except Exception as e:
+                    self.logger.warning(f"Could not enable basic CUDA optimizations: {e}")
         
         # Setup mixed precision if requested
         if mixed_precision and self.device_manager.device.type == "cuda":
@@ -401,10 +459,23 @@ class ModelOptimizer:
         
         return model
     
-    def create_scaler(self) -> Optional[torch.cuda.amp.GradScaler]:
-        """Create gradient scaler for mixed precision training."""
+    def create_scaler(self) -> Optional[torch.amp.GradScaler]:
+        """Create optimized gradient scaler for mixed precision training."""
         if self.device_manager.device.type == "cuda":
-            return torch.cuda.amp.GradScaler()
+            # Use Windows-optimized scaler if available
+            if _windows_optimizations_available:
+                return _windows_optimizer.create_optimized_scaler()
+            else:
+                # Fallback implementation
+                try:
+                    # Use new API if available (PyTorch 2.1+)
+                    return torch.amp.GradScaler('cuda')
+                except (AttributeError, TypeError):
+                    # Fallback to old API with warning suppression
+                    import warnings
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", category=FutureWarning)
+                        return torch.cuda.amp.GradScaler()
         return None
 
 
@@ -531,7 +602,7 @@ if __name__ == "__main__":
     model = optimizer.optimize_model(model, compile_model=False)  # Disable compile for testing
     
     # Test model summary
-    summary = model_summary(model, [(8, 84, 84), (12,)])
+    summary = model_summary(model, [(4, 84, 84), (12,)])  # Fixed: changed from 8 to 4
     print(f"\nModel Summary:\n{summary}")
     
     # Test model manager

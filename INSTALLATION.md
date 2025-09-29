@@ -29,7 +29,7 @@ The easiest way to install on Windows is using our automated installation script
 
 ### Step 1: Clone Repository
 ```batch
-git clone https://github.com/your-username/Super-Mario-Bot-V3.git
+git clone https://github.com/RynAgain/Super-Mario-Bot-V3.git
 cd Super-Mario-Bot-V3
 ```
 
@@ -55,7 +55,7 @@ run_training.bat
 
 ### Step 1: Clone Repository
 ```bash
-git clone https://github.com/your-username/Super-Mario-Bot-V3.git
+git clone https://github.com/RynAgain/Super-Mario-Bot-V3.git
 cd Super-Mario-Bot-V3
 ```
 

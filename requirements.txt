@@ -4,6 +4,7 @@
 torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
+triton  # Optional: Not available on Python 3.13/Windows - handled by fallback
 
 # Computer Vision and Image Processing
 opencv-python>=4.8.0
@@ -22,7 +23,7 @@ tensorboard>=2.13.0
 wandb>=0.15.0
 
 # Networking (for WebSocket communication)
-websockets>=11.0
+websockets>=15.0
 asyncio-mqtt>=0.13.0
 
 # Windows-specific dependencies for frame capture
@@ -32,6 +33,7 @@ pywin32>=306; sys_platform == "win32"
 tqdm>=4.65.0
 colorama>=0.4.6
 psutil>=5.9.0
+GPUtil>=1.4.0
 
 # Development and Testing
 pytest>=7.4.0
@@ -41,13 +43,17 @@ flake8>=6.0.0
 mypy>=1.5.0
 
 # Optional: CUDA support (uncomment if using GPU)
-# torch-audio>=2.0.0+cu118
-# torch-vision>=0.15.0+cu118
+torchaudio
+torchvision
 
 # Optional: Performance optimizations
-# numba>=0.57.0
+numba>=0.57.0
 # cupy-cuda11x>=12.0.0  # For CUDA 11.x
-# cupy-cuda12x>=12.0.0  # For CUDA 12.x
+cupy-cuda12x>=12.0.0  # For CUDA 12.x
+
+# Plotting and Visualization
+matplotlib>=3.5.0
+seaborn>=0.11.0
 
 # Documentation
 sphinx>=7.0.0

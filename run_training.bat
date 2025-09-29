@@ -13,11 +13,16 @@ if exist "mario_ai_env\Scripts\activate.bat" (
     call mario_ai_env\Scripts\activate.bat
     echo Virtual environment activated!
     echo.
+    set PYTHON_CMD=mario_ai_env\Scripts\python.exe
+) else (
+    echo No virtual environment found, using global Python...
+    set PYTHON_CMD=python
+    echo.
 )
 
 REM Check if Python and required packages are available
 echo Checking system requirements...
-python --version >nul 2>&1
+%PYTHON_CMD% --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo ERROR: Python is not available
     echo Please run install.bat first or ensure Python is in your PATH
@@ -26,7 +31,11 @@ if %errorlevel% neq 0 (
 )
 
 REM Check if the main module is available
-python -c "import python.main" >nul 2>&1
+if exist "mario_ai_env\Scripts\python.exe" (
+    mario_ai_env\Scripts\python.exe -c "import python.main" >nul 2>&1
+) else (
+    %PYTHON_CMD% -c "import sys; sys.path.insert(0, '.'); import python.main" >nul 2>&1
+)
 if %errorlevel% neq 0 (
     echo ERROR: Super Mario AI package not found
     echo Please run install.bat first to install the package
@@ -82,7 +91,7 @@ set /p continue="Press Enter when FCEUX is ready, or 'q' to quit: "
 if /i "%continue%"=="q" goto menu
 
 echo Starting training...
-python python/main.py train
+%PYTHON_CMD% python/main.py train
 goto post_training
 
 :custom_config
@@ -111,7 +120,7 @@ set /p continue="Press Enter when FCEUX is ready, or 'q' to quit: "
 if /i "%continue%"=="q" goto menu
 
 echo Starting training with config: %config_file%
-python python/main.py train --config "%config_file%"
+%PYTHON_CMD% python/main.py train --config "%config_file%"
 goto post_training
 
 :resume_training
@@ -153,7 +162,7 @@ set /p continue="Press Enter when FCEUX is ready, or 'q' to quit: "
 if /i "%continue%"=="q" goto menu
 
 echo Resuming training from checkpoint: %checkpoint%
-python python/main.py train --resume "checkpoints\%checkpoint%"
+%PYTHON_CMD% python/main.py train --resume "checkpoints\%checkpoint%"
 goto post_training
 
 :run_tests
@@ -163,13 +172,13 @@ echo  Running System Tests
 echo ================================================================
 echo.
 echo Running comprehensive integration tests...
-python test_complete_system_integration.py
+%PYTHON_CMD% test_complete_system_integration.py
 echo.
 echo Running neural network component tests...
-python test_neural_network_components.py
+%PYTHON_CMD% test_neural_network_components.py
 echo.
 echo Running communication system tests...
-python test_communication_system.py
+%PYTHON_CMD% test_communication_system.py
 echo.
 echo All tests completed!
 pause
@@ -182,7 +191,7 @@ echo  System Validation
 echo ================================================================
 echo.
 echo Running system validation...
-python validate_system.py
+%PYTHON_CMD% validate_system.py
 pause
 goto menu
 
@@ -233,7 +242,7 @@ if exist "logs" (
     
     if exist "logs\%session%" (
         echo Generating plots for session: %session%
-        python python/logging/plotter.py --session "%session%"
+        %PYTHON_CMD% python/mario_logging/plotter.py --session "%session%"
     ) else (
         echo Session directory not found: logs\%session%
     )

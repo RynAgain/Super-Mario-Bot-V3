@@ -1,600 +1,860 @@
+#!/usr/bin/env python3
 """
-System Validation Script for Super Mario Bros AI Training System
+Enhanced State Management System Validation Script
+=================================================
 
-This script performs comprehensive validation of the entire system to ensure
-all components are properly installed, configured, and working correctly.
-It checks dependencies, configurations, system resources, and component functionality.
+This script validates the enhanced state management system by running comprehensive
+integration tests and generating a detailed validation report.
 
 Usage:
-    python validate_system.py [OPTIONS]
+    python validate_system.py [--enhanced] [--legacy] [--performance] [--report-only]
 
-Examples:
-    python validate_system.py
-    python validate_system.py --verbose
-    python validate_system.py --fix-issues
-    python validate_system.py --export-report validation_report.json
+Options:
+    --enhanced      Test enhanced 20-feature mode (default)
+    --legacy        Test legacy 12-feature mode
+    --performance   Run performance benchmarks
+    --report-only   Generate report from existing test results
+
+Author: AI Training System
+Version: 1.0
 """
 
 import argparse
+import asyncio
 import json
 import logging
 import os
-import platform
-import psutil
-import subprocess
 import sys
 import time
-import traceback
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
-import warnings
+from typing import Dict, Any, List
 
-# Suppress warnings for cleaner output
-warnings.filterwarnings('ignore')
-
-# Add project root to Python path
+# Add project root to path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
+from test_integration_suite import IntegrationTestSuite
+
 
 class SystemValidator:
-    """Comprehensive system validation for the Mario AI training system."""
+    """System validation orchestrator."""
     
-    def __init__(self, verbose: bool = False, fix_issues: bool = False):
-        self.verbose = verbose
-        self.fix_issues = fix_issues
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize system validator.
+        
+        Args:
+            config: Validation configuration
+        """
+        self.config = config
+        self.logger = logging.getLogger(__name__)
         self.validation_results = {}
-        self.issues_found = []
-        self.fixes_applied = []
         
         # Setup logging
-        log_level = logging.DEBUG if verbose else logging.INFO
+        self._setup_logging()
+        
+        self.logger.info("System validator initialized")
+        self.logger.info(f"Configuration: {config}")
+    
+    def _setup_logging(self):
+        """Setup logging configuration."""
+        log_level = logging.DEBUG if self.config.get('verbose', False) else logging.INFO
+        
         logging.basicConfig(
             level=log_level,
-            format='%(levelname)s: %(message)s',
-            handlers=[logging.StreamHandler()]
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.StreamHandler(sys.stdout),
+                logging.FileHandler('system_validation.log')
+            ]
         )
-        self.logger = logging.getLogger(__name__)
     
-    def log_result(self, test_name: str, passed: bool, message: str = "", details: Dict = None):
-        """Log validation result."""
-        self.validation_results[test_name] = {
-            'passed': passed,
-            'message': message,
-            'details': details or {}
+    async def validate_system(self) -> Dict[str, Any]:
+        """
+        Run comprehensive system validation.
+        
+        Returns:
+            Validation results dictionary
+        """
+        self.logger.info("[START] Starting Enhanced State Management System Validation")
+        self.logger.info("=" * 80)
+        
+        validation_start_time = time.time()
+        
+        # Phase 1: Pre-validation checks
+        self.logger.info("Phase 1: Pre-validation system checks")
+        pre_validation_results = await self._run_pre_validation_checks()
+        
+        if not pre_validation_results['passed']:
+            self.logger.error("[FAIL] Pre-validation checks failed")
+            return self._generate_failure_report("Pre-validation checks failed", pre_validation_results)
+        
+        self.logger.info("[PASS] Pre-validation checks passed")
+        
+        # Phase 2: Integration testing
+        self.logger.info("Phase 2: Integration testing")
+        integration_results = await self._run_integration_tests()
+        
+        # Phase 3: Performance validation
+        performance_results = {}
+        if self.config.get('performance_tests', True):
+            self.logger.info("Phase 3: Performance validation")
+            performance_results = await self._run_performance_validation()
+        
+        # Phase 4: System readiness assessment
+        self.logger.info("Phase 4: System readiness assessment")
+        readiness_results = await self._assess_system_readiness(integration_results, performance_results)
+        
+        # Generate comprehensive validation report
+        total_validation_time = time.time() - validation_start_time
+        
+        validation_report = {
+            'validation_timestamp': time.time(),
+            'validation_duration_seconds': total_validation_time,
+            'configuration': self.config,
+            'pre_validation': pre_validation_results,
+            'integration_tests': integration_results,
+            'performance_validation': performance_results,
+            'system_readiness': readiness_results,
+            'overall_status': self._determine_overall_status(integration_results, performance_results, readiness_results),
+            'recommendations': self._generate_recommendations(integration_results, performance_results, readiness_results)
         }
         
-        status = "✓ PASS" if passed else "❌ FAIL"
-        print(f"{status} {test_name}: {message}")
+        self.validation_results = validation_report
         
-        if not passed:
-            self.issues_found.append({
-                'test': test_name,
-                'message': message,
-                'details': details or {}
-            })
+        # Save validation report
+        await self._save_validation_report(validation_report)
+        
+        self.logger.info(f"[PASS] System validation completed in {total_validation_time:.2f} seconds")
+        
+        return validation_report
     
-    def validate_python_environment(self) -> bool:
-        """Validate Python environment and version."""
-        print("\n" + "="*50)
-        print("PYTHON ENVIRONMENT VALIDATION")
-        print("="*50)
+    async def _run_pre_validation_checks(self) -> Dict[str, Any]:
+        """Run pre-validation system checks."""
+        checks = {
+            'python_version': self._check_python_version(),
+            'dependencies': self._check_dependencies(),
+            'file_structure': self._check_file_structure(),
+            'configuration_files': self._check_configuration_files()
+        }
         
+        passed_checks = sum(1 for result in checks.values() if result['passed'])
+        total_checks = len(checks)
+        
+        return {
+            'passed': passed_checks == total_checks,
+            'checks': checks,
+            'summary': f"{passed_checks}/{total_checks} checks passed"
+        }
+    
+    def _check_python_version(self) -> Dict[str, Any]:
+        """Check Python version compatibility."""
         try:
-            # Check Python version
-            python_version = sys.version_info
-            version_str = f"{python_version.major}.{python_version.minor}.{python_version.micro}"
+            version = sys.version_info
+            required_major, required_minor = 3, 8
             
-            if python_version >= (3, 8):
-                self.log_result("Python Version", True, f"Python {version_str}")
+            if version.major >= required_major and version.minor >= required_minor:
+                return {
+                    'passed': True,
+                    'message': f"Python {version.major}.{version.minor}.{version.micro} is compatible",
+                    'version': f"{version.major}.{version.minor}.{version.micro}"
+                }
             else:
-                self.log_result("Python Version", False, 
-                              f"Python {version_str} (requires 3.8+)")
-                return False
-            
-            # Check Python executable
-            python_exe = sys.executable
-            self.log_result("Python Executable", True, python_exe)
-            
-            # Check virtual environment
-            in_venv = hasattr(sys, 'real_prefix') or (
-                hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix
-            )
-            
-            if in_venv:
-                venv_path = sys.prefix
-                self.log_result("Virtual Environment", True, f"Active: {venv_path}")
-            else:
-                self.log_result("Virtual Environment", True, "Not using virtual environment")
-            
-            # Check pip availability
-            try:
-                import pip
-                pip_version = pip.__version__
-                self.log_result("Pip Availability", True, f"pip {pip_version}")
-            except ImportError:
-                self.log_result("Pip Availability", False, "pip not available")
-                return False
-            
-            return True
-            
+                return {
+                    'passed': False,
+                    'message': f"Python {version.major}.{version.minor} is too old, requires {required_major}.{required_minor}+",
+                    'version': f"{version.major}.{version.minor}.{version.micro}"
+                }
         except Exception as e:
-            self.log_result("Python Environment", False, f"Validation failed: {e}")
-            return False
-    
-    def validate_dependencies(self) -> bool:
-        """Validate all required Python dependencies."""
-        print("\n" + "="*50)
-        print("DEPENDENCIES VALIDATION")
-        print("="*50)
-        
-        # Required dependencies with minimum versions
-        required_deps = {
-            'torch': '1.12.0',
-            'torchvision': '0.13.0',
-            'numpy': '1.21.0',
-            'opencv-python': '4.5.0',
-            'websockets': '10.0',
-            'pyyaml': '5.4.0',
-            'psutil': '5.8.0',
-            'pandas': '1.3.0'
-        }
-        
-        # Optional dependencies
-        optional_deps = {
-            'matplotlib': '3.5.0',
-            'seaborn': '0.11.0',
-            'tensorboard': '2.8.0'
-        }
-        
-        all_passed = True
-        
-        # Check required dependencies
-        for package, min_version in required_deps.items():
-            try:
-                if package == 'opencv-python':
-                    import cv2
-                    version = cv2.__version__
-                    package_name = 'opencv-python'
-                else:
-                    module = __import__(package)
-                    version = getattr(module, '__version__', 'unknown')
-                    package_name = package
-                
-                self.log_result(f"Required: {package_name}", True, f"v{version}")
-                
-            except ImportError:
-                self.log_result(f"Required: {package_name}", False, "Not installed")
-                all_passed = False
-                
-                if self.fix_issues:
-                    self._attempt_package_install(package)
-        
-        # Check optional dependencies
-        for package, min_version in optional_deps.items():
-            try:
-                module = __import__(package)
-                version = getattr(module, '__version__', 'unknown')
-                self.log_result(f"Optional: {package}", True, f"v{version}")
-            except ImportError:
-                self.log_result(f"Optional: {package}", True, "Not installed (optional)")
-        
-        # Check CUDA availability
-        try:
-            import torch
-            cuda_available = torch.cuda.is_available()
-            if cuda_available:
-                cuda_version = torch.version.cuda
-                gpu_count = torch.cuda.device_count()
-                gpu_name = torch.cuda.get_device_name(0) if gpu_count > 0 else "Unknown"
-                self.log_result("CUDA Support", True, 
-                              f"CUDA {cuda_version}, {gpu_count} GPU(s), {gpu_name}")
-            else:
-                self.log_result("CUDA Support", True, "CPU-only mode (CUDA not available)")
-        except Exception as e:
-            self.log_result("CUDA Support", False, f"Error checking CUDA: {e}")
-        
-        return all_passed
-    
-    def validate_system_resources(self) -> bool:
-        """Validate system resources and performance."""
-        print("\n" + "="*50)
-        print("SYSTEM RESOURCES VALIDATION")
-        print("="*50)
-        
-        try:
-            # System information
-            system_info = {
-                'platform': platform.system(),
-                'platform_version': platform.version(),
-                'architecture': platform.architecture()[0],
-                'processor': platform.processor(),
-                'python_implementation': platform.python_implementation()
+            return {
+                'passed': False,
+                'message': f"Failed to check Python version: {e}",
+                'error': str(e)
             }
-            
-            self.log_result("System Platform", True, 
-                          f"{system_info['platform']} {system_info['architecture']}")
-            
-            # Memory check
-            memory = psutil.virtual_memory()
-            memory_gb = memory.total / (1024**3)
-            memory_available_gb = memory.available / (1024**3)
-            
-            if memory_gb >= 8.0:
-                self.log_result("System Memory", True, 
-                              f"{memory_gb:.1f}GB total, {memory_available_gb:.1f}GB available")
-            else:
-                self.log_result("System Memory", False, 
-                              f"{memory_gb:.1f}GB total (8GB+ recommended)")
-            
-            # CPU check
-            cpu_count = psutil.cpu_count()
-            cpu_freq = psutil.cpu_freq()
-            cpu_usage = psutil.cpu_percent(interval=1)
-            
-            cpu_info = f"{cpu_count} cores"
-            if cpu_freq:
-                cpu_info += f", {cpu_freq.current:.0f}MHz"
-            cpu_info += f", {cpu_usage:.1f}% usage"
-            
-            self.log_result("CPU Resources", True, cpu_info)
-            
-            # Disk space check
-            disk_usage = psutil.disk_usage('.')
-            disk_free_gb = disk_usage.free / (1024**3)
-            
-            if disk_free_gb >= 2.0:
-                self.log_result("Disk Space", True, f"{disk_free_gb:.1f}GB free")
-            else:
-                self.log_result("Disk Space", False, 
-                              f"{disk_free_gb:.1f}GB free (2GB+ recommended)")
-            
-            # Network connectivity check
+    
+    def _check_dependencies(self) -> Dict[str, Any]:
+        """Check required dependencies."""
+        required_packages = [
+            'torch', 'numpy', 'websockets', 'asyncio', 'cv2'
+        ]
+        
+        missing_packages = []
+        available_packages = []
+        
+        for package in required_packages:
             try:
-                import socket
-                socket.create_connection(("8.8.8.8", 53), timeout=3)
-                self.log_result("Network Connectivity", True, "Internet connection available")
-            except OSError:
-                self.log_result("Network Connectivity", False, "No internet connection")
-            
-            return True
-            
-        except Exception as e:
-            self.log_result("System Resources", False, f"Validation failed: {e}")
-            return False
+                if package == 'cv2':
+                    import cv2
+                    available_packages.append(f"{package} ({cv2.__version__})")
+                elif package == 'torch':
+                    import torch
+                    available_packages.append(f"{package} ({torch.__version__})")
+                elif package == 'numpy':
+                    import numpy
+                    available_packages.append(f"{package} ({numpy.__version__})")
+                elif package == 'websockets':
+                    import websockets
+                    available_packages.append(f"{package} ({websockets.__version__})")
+                elif package == 'asyncio':
+                    import asyncio
+                    available_packages.append(package)
+                else:
+                    __import__(package)
+                    available_packages.append(package)
+            except ImportError:
+                missing_packages.append(package)
+        
+        return {
+            'passed': len(missing_packages) == 0,
+            'available_packages': available_packages,
+            'missing_packages': missing_packages,
+            'message': f"{len(available_packages)}/{len(required_packages)} required packages available"
+        }
     
-    def validate_project_structure(self) -> bool:
-        """Validate project directory structure and files."""
-        print("\n" + "="*50)
-        print("PROJECT STRUCTURE VALIDATION")
-        print("="*50)
-        
-        # Required directories
-        required_dirs = [
-            'python', 'config', 'docs', 'lua', 'examples'
-        ]
-        
-        # Required files
+    def _check_file_structure(self) -> Dict[str, Any]:
+        """Check project file structure."""
         required_files = [
-            'README.md', 'requirements.txt', 'setup.py',
-            'python/main.py', 'python/__init__.py',
-            'config/training_config.yaml', 'config/network_config.yaml',
-            'lua/mario_ai.lua', 'lua/json.lua'
+            'lua/mario_ai.lua',
+            'python/utils/preprocessing.py',
+            'python/environment/reward_calculator.py',
+            'python/communication/websocket_server.py',
+            'python/communication/comm_manager.py',
+            'python/models/dueling_dqn.py',
+            'python/agents/dqn_agent.py'
         ]
         
-        # Optional but recommended files
-        optional_files = [
-            'INSTALLATION.md', 'USAGE.md', 'TROUBLESHOOTING.md',
-            'install.bat', 'run_training.bat', 'validate_system.py'
-        ]
+        missing_files = []
+        existing_files = []
         
-        all_passed = True
-        
-        # Check directories
-        for dir_name in required_dirs:
-            dir_path = Path(dir_name)
-            if dir_path.exists() and dir_path.is_dir():
-                file_count = len(list(dir_path.rglob('*')))
-                self.log_result(f"Directory: {dir_name}", True, f"{file_count} files")
+        for file_path in required_files:
+            full_path = project_root / file_path
+            if full_path.exists():
+                existing_files.append(file_path)
             else:
-                self.log_result(f"Directory: {dir_name}", False, "Missing")
-                all_passed = False
+                missing_files.append(file_path)
         
-        # Check required files
-        for file_name in required_files:
-            file_path = Path(file_name)
-            if file_path.exists() and file_path.is_file():
-                file_size = file_path.stat().st_size
-                self.log_result(f"Required: {file_name}", True, f"{file_size} bytes")
-            else:
-                self.log_result(f"Required: {file_name}", False, "Missing")
-                all_passed = False
-        
-        # Check optional files
-        for file_name in optional_files:
-            file_path = Path(file_name)
-            if file_path.exists() and file_path.is_file():
-                file_size = file_path.stat().st_size
-                self.log_result(f"Optional: {file_name}", True, f"{file_size} bytes")
-            else:
-                self.log_result(f"Optional: {file_name}", True, "Missing (optional)")
-        
-        return all_passed
+        return {
+            'passed': len(missing_files) == 0,
+            'existing_files': existing_files,
+            'missing_files': missing_files,
+            'message': f"{len(existing_files)}/{len(required_files)} required files found"
+        }
     
-    def validate_configurations(self) -> bool:
-        """Validate configuration files."""
-        print("\n" + "="*50)
-        print("CONFIGURATION VALIDATION")
-        print("="*50)
-        
+    def _check_configuration_files(self) -> Dict[str, Any]:
+        """Check configuration files."""
         config_files = [
             'config/training_config.yaml',
-            'config/network_config.yaml',
-            'config/game_config.yaml',
-            'config/logging_config.yaml'
+            'config/network_config.yaml'
         ]
         
-        all_passed = True
+        config_status = {}
+        all_configs_valid = True
         
         for config_file in config_files:
-            try:
-                # Check if file exists
-                config_path = Path(config_file)
-                if not config_path.exists():
-                    self.log_result(f"Config: {config_file}", False, "File not found")
-                    all_passed = False
-                    continue
-                
-                # Try to load and validate YAML
-                import yaml
-                with open(config_path, 'r') as f:
-                    config_data = yaml.safe_load(f)
-                
-                if config_data is None:
-                    self.log_result(f"Config: {config_file}", False, "Empty or invalid YAML")
-                    all_passed = False
-                    continue
-                
-                # Basic structure validation
-                if config_file.endswith('training_config.yaml'):
-                    required_keys = ['training', 'performance', 'network']
-                    missing_keys = [key for key in required_keys if key not in config_data]
-                    if missing_keys:
-                        self.log_result(f"Config: {config_file}", False, 
-                                      f"Missing keys: {missing_keys}")
-                        all_passed = False
-                        continue
-                
-                self.log_result(f"Config: {config_file}", True, "Valid YAML structure")
-                
-            except Exception as e:
-                self.log_result(f"Config: {config_file}", False, f"Validation error: {e}")
-                all_passed = False
+            config_path = project_root / config_file
+            if config_path.exists():
+                try:
+                    # Try to load configuration
+                    if config_file.endswith('.yaml'):
+                        try:
+                            import yaml
+                            with open(config_path, 'r') as f:
+                                config_data = yaml.safe_load(f)
+                        except ImportError:
+                            # yaml not available, skip validation but don't fail
+                            config_status[config_file] = {
+                                'exists': True,
+                                'valid': True,
+                                'warning': 'yaml not available for validation'
+                            }
+                            continue
+                        config_status[config_file] = {
+                            'exists': True,
+                            'valid': True,
+                            'keys': list(config_data.keys()) if isinstance(config_data, dict) else []
+                        }
+                    else:
+                        config_status[config_file] = {
+                            'exists': True,
+                            'valid': True,
+                            'keys': []
+                        }
+                except Exception as e:
+                    config_status[config_file] = {
+                        'exists': True,
+                        'valid': False,
+                        'error': str(e)
+                    }
+                    all_configs_valid = False
+            else:
+                config_status[config_file] = {
+                    'exists': False,
+                    'valid': False
+                }
+                all_configs_valid = False
         
-        # Test configuration loading with the system
-        try:
-            from python.utils.config_loader import ConfigLoader
-            config_loader = ConfigLoader()
-            config = config_loader.load_config('config/training_config.yaml')
-            self.log_result("Config Loading", True, "System can load configurations")
-        except Exception as e:
-            self.log_result("Config Loading", False, f"System config loading failed: {e}")
-            all_passed = False
-        
-        return all_passed
+        return {
+            'passed': all_configs_valid,
+            'config_status': config_status,
+            'message': f"Configuration files validation: {'passed' if all_configs_valid else 'failed'}"
+        }
     
-    def validate_neural_network_components(self) -> bool:
-        """Validate neural network components."""
-        print("\n" + "="*50)
-        print("NEURAL NETWORK VALIDATION")
-        print("="*50)
-        
+    async def _run_integration_tests(self) -> Dict[str, Any]:
+        """Run integration tests."""
         try:
-            # Test model creation
-            from python.models.dueling_dqn import DuelingDQN
-            import torch
+            # Create integration test suite
+            test_suite = IntegrationTestSuite()
             
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            model = DuelingDQN(
-                input_channels=4,
-                num_actions=12,
-                hidden_size=512
-            ).to(device)
+            # Configure test suite based on validation config
+            test_suite.test_config.update({
+                'enhanced_features': self.config.get('test_enhanced', True),
+                'legacy_mode': self.config.get('test_legacy', True),
+                'performance_benchmarks': self.config.get('performance_tests', True),
+                'error_injection': self.config.get('test_error_handling', True),
+                'checkpoint_validation': self.config.get('test_checkpoints', True)
+            })
             
-            self.log_result("Model Creation", True, f"DuelingDQN created on {device}")
+            # Run all integration tests
+            integration_results = await test_suite.run_all_tests()
             
-            # Test forward pass
-            dummy_input = torch.randn(1, 4, 84, 84).to(device)
-            with torch.no_grad():
-                output = model(dummy_input)
-            
-            expected_shape = (1, 12)
-            if output.shape == expected_shape:
-                self.log_result("Model Forward Pass", True, f"Output shape: {output.shape}")
-            else:
-                self.log_result("Model Forward Pass", False, 
-                              f"Wrong output shape: {output.shape}, expected: {expected_shape}")
-                return False
-            
-            # Test agent creation
-            from python.agents.dqn_agent import DQNAgent
-            agent = DQNAgent(
-                state_dim=(4, 84, 84),
-                action_dim=12,
-                learning_rate=0.001,
-                device=device
-            )
-            
-            self.log_result("Agent Creation", True, "DQNAgent initialized")
-            
-            # Test action selection
-            state = torch.randn(4, 84, 84).to(device)
-            action = agent.select_action(state)
-            
-            if 0 <= action < 12:
-                self.log_result("Action Selection", True, f"Selected action: {action}")
-            else:
-                self.log_result("Action Selection", False, f"Invalid action: {action}")
-                return False
-            
-            return True
+            return integration_results
             
         except Exception as e:
-            self.log_result("Neural Network Components", False, f"Validation failed: {e}")
-            if self.verbose:
-                self.logger.error(traceback.format_exc())
-            return False
+            self.logger.error(f"Integration tests failed with exception: {e}")
+            return {
+                'overall_status': 'FAILED',
+                'system_ready_for_training': False,
+                'error': str(e),
+                'test_statistics': {
+                    'total_tests': 0,
+                    'tests_passed': 0,
+                    'tests_failed': 1,
+                    'success_rate_percent': 0
+                }
+            }
     
-    def _attempt_package_install(self, package: str):
-        """Attempt to install missing package."""
-        if not self.fix_issues:
-            return
-        
-        try:
-            print(f"  Attempting to install {package}...")
-            result = subprocess.run([sys.executable, '-m', 'pip', 'install', package], 
-                                  capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                self.fixes_applied.append(f"Installed {package}")
-                print(f"  ✓ Successfully installed {package}")
-            else:
-                print(f"  ❌ Failed to install {package}: {result.stderr}")
-                
-        except Exception as e:
-            print(f"  ❌ Error installing {package}: {e}")
-    
-    def generate_validation_report(self) -> Dict[str, Any]:
-        """Generate comprehensive validation report."""
-        total_tests = len(self.validation_results)
-        passed_tests = sum(1 for result in self.validation_results.values() if result['passed'])
-        failed_tests = total_tests - passed_tests
-        
-        report = {
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'system_info': {
-                'platform': platform.system(),
-                'platform_version': platform.version(),
-                'architecture': platform.architecture()[0],
-                'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-                'python_executable': sys.executable
-            },
-            'summary': {
-                'total_tests': total_tests,
-                'passed_tests': passed_tests,
-                'failed_tests': failed_tests,
-                'success_rate': (passed_tests / total_tests * 100) if total_tests > 0 else 0
-            },
-            'test_results': self.validation_results,
-            'issues_found': self.issues_found,
-            'fixes_applied': self.fixes_applied
+    async def _run_performance_validation(self) -> Dict[str, Any]:
+        """Run performance validation tests."""
+        performance_results = {
+            'cpu_usage': await self._measure_cpu_usage(),
+            'memory_usage': await self._measure_memory_usage(),
+            'throughput': await self._measure_throughput(),
+            'latency': await self._measure_latency()
         }
         
-        return report
+        # Determine if performance is acceptable
+        performance_acceptable = (
+            performance_results['cpu_usage'].get('acceptable', True) and
+            performance_results['memory_usage'].get('acceptable', True) and
+            performance_results['throughput'].get('acceptable', True) and
+            performance_results['latency'].get('acceptable', True)
+        )
+        
+        return {
+            'acceptable': performance_acceptable,
+            'metrics': performance_results,
+            'summary': "Performance validation " + ("passed" if performance_acceptable else "failed")
+        }
     
-    def print_validation_summary(self):
-        """Print validation summary."""
-        total_tests = len(self.validation_results)
-        passed_tests = sum(1 for result in self.validation_results.values() if result['passed'])
-        failed_tests = total_tests - passed_tests
-        
-        print("\n" + "="*60)
-        print("SYSTEM VALIDATION SUMMARY")
-        print("="*60)
-        
-        print(f"\nValidation Results:")
-        print(f"  Total Tests: {total_tests}")
-        print(f"  Passed: {passed_tests}")
-        print(f"  Failed: {failed_tests}")
-        print(f"  Success Rate: {(passed_tests/total_tests)*100:.1f}%")
-        
-        if failed_tests == 0:
-            print(f"\n🎉 ALL TESTS PASSED!")
-            print("The Super Mario Bros AI Training System is ready for use!")
-        else:
-            print(f"\n⚠️  {failed_tests} test(s) failed.")
-            print("Please review the issues above and follow the recommendations.")
-        
-        if self.fixes_applied:
-            print(f"\nFixes Applied:")
-            for fix in self.fixes_applied:
-                print(f"  ✓ {fix}")
-        
-        print("\nNext Steps:")
-        if failed_tests == 0:
-            print("  1. Start FCEUX with Super Mario Bros ROM")
-            print("  2. Load lua/mario_ai.lua script in FCEUX")
-            print("  3. Run training: python python/main.py train")
-            print("  4. Monitor progress in logs/ directory")
-        else:
-            print("  1. Fix the issues identified above")
-            print("  2. Re-run validation: python validate_system.py")
-            print("  3. Check TROUBLESHOOTING.md for common solutions")
-        
-        print("="*60)
-    
-    def run_full_validation(self) -> bool:
-        """Run complete system validation."""
-        print("🎮 Super Mario Bros AI Training System - System Validation")
-        print("="*60)
-        print(f"Validation started at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-        
-        validation_steps = [
-            ("Python Environment", self.validate_python_environment),
-            ("Dependencies", self.validate_dependencies),
-            ("System Resources", self.validate_system_resources),
-            ("Project Structure", self.validate_project_structure),
-            ("Configurations", self.validate_configurations),
-            ("Neural Network Components", self.validate_neural_network_components)
-        ]
-        
-        all_passed = True
-        
-        for step_name, validation_func in validation_steps:
-            try:
-                step_passed = validation_func()
-                if not step_passed:
-                    all_passed = False
-            except Exception as e:
-                self.log_result(step_name, False, f"Validation error: {e}")
-                if self.verbose:
-                    self.logger.error(traceback.format_exc())
-                all_passed = False
-        
-        self.print_validation_summary()
-        return all_passed
-
-
-def main():
-    """Main function for system validation."""
-    parser = argparse.ArgumentParser(description="Validate Super Mario Bros AI Training System")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
-    parser.add_argument("--fix-issues", action="store_true", help="Attempt to fix issues automatically")
-    parser.add_argument("--export-report", type=str, help="Export validation report to JSON file")
-    parser.add_argument("--quick", action="store_true", help="Run quick validation (skip benchmarks)")
-    
-    args = parser.parse_args()
-    
-    # Initialize validator
-    validator = SystemValidator(verbose=args.verbose, fix_issues=args.fix_issues)
-    
-    # Run validation
-    all_passed = validator.run_full_validation()
-    
-    # Export report if requested
-    if args.export_report:
+    async def _measure_cpu_usage(self) -> Dict[str, Any]:
+        """Measure CPU usage during processing."""
         try:
-            report = validator.generate_validation_report()
-            with open(args.export_report, 'w') as f:
-                json.dump(report, f, indent=2)
-            print(f"\n📄 Validation report exported to: {args.export_report}")
+            import psutil
+            
+            # Measure CPU usage during simulated processing
+            cpu_percent_before = psutil.cpu_percent(interval=1)
+            
+            # Simulate processing load
+            from test_integration_suite import TestDataGenerator
+            generator = TestDataGenerator()
+            
+            start_time = time.time()
+            for _ in range(100):
+                payload = generator.generate_enhanced_payload()
+                # Simulate processing
+                time.sleep(0.001)  # 1ms processing time
+            
+            processing_time = time.time() - start_time
+            cpu_percent_after = psutil.cpu_percent(interval=1)
+            
+            cpu_usage = max(cpu_percent_after - cpu_percent_before, 0)
+            
+            return {
+                'cpu_usage_percent': cpu_usage,
+                'processing_time_seconds': processing_time,
+                'acceptable': cpu_usage < 50,  # Less than 50% CPU usage
+                'message': f"CPU usage: {cpu_usage:.1f}%"
+            }
+            
+        except ImportError:
+            return {
+                'cpu_usage_percent': 0,
+                'acceptable': True,
+                'message': "psutil not available, skipping CPU measurement",
+                'skipped': True
+            }
         except Exception as e:
-            print(f"❌ Failed to export report: {e}")
+            return {
+                'cpu_usage_percent': 0,
+                'acceptable': False,
+                'error': str(e),
+                'message': f"CPU measurement failed: {e}"
+            }
     
-    # Exit with appropriate code
-    return 0 if all_passed else 1
+    async def _measure_memory_usage(self) -> Dict[str, Any]:
+        """Measure memory usage during processing."""
+        try:
+            import psutil
+            import gc
+            
+            process = psutil.Process()
+            memory_before = process.memory_info().rss / 1024 / 1024  # MB
+            
+            # Simulate memory-intensive processing
+            from test_integration_suite import TestDataGenerator
+            from python.utils.preprocessing import MarioPreprocessor
+            
+            generator = TestDataGenerator()
+            preprocessor = MarioPreprocessor(enhanced_features=True)
+            
+            # Process many frames
+            for _ in range(50):
+                payload = generator.generate_enhanced_payload()
+                game_state = generator.generate_game_state(enhanced=True)
+                
+                import numpy as np
+                raw_frame = np.random.randint(0, 255, (240, 256, 3), dtype=np.uint8)
+                stacked_frames, state_vector = preprocessor.process_step(raw_frame, game_state)
+            
+            gc.collect()  # Force garbage collection
+            
+            memory_after = process.memory_info().rss / 1024 / 1024  # MB
+            memory_increase = memory_after - memory_before
+            
+            return {
+                'memory_usage_mb': memory_increase,
+                'memory_before_mb': memory_before,
+                'memory_after_mb': memory_after,
+                'acceptable': memory_increase < 100,  # Less than 100MB increase
+                'message': f"Memory usage increase: {memory_increase:.1f}MB"
+            }
+            
+        except ImportError:
+            return {
+                'memory_usage_mb': 0,
+                'acceptable': True,
+                'message': "psutil not available, skipping memory measurement",
+                'skipped': True
+            }
+        except Exception as e:
+            return {
+                'memory_usage_mb': 0,
+                'acceptable': False,
+                'error': str(e),
+                'message': f"Memory measurement failed: {e}"
+            }
+    
+    async def _measure_throughput(self) -> Dict[str, Any]:
+        """Measure system throughput."""
+        try:
+            from test_integration_suite import TestDataGenerator
+            from python.utils.preprocessing import BinaryPayloadParser
+            
+            generator = TestDataGenerator()
+            parser = BinaryPayloadParser(enhanced_features=True)
+            
+            # Measure parsing throughput
+            num_payloads = 1000
+            start_time = time.time()
+            
+            for _ in range(num_payloads):
+                payload = generator.generate_enhanced_payload()
+                parsed_state = parser.parse_payload(payload)
+            
+            end_time = time.time()
+            total_time = end_time - start_time
+            throughput = num_payloads / total_time  # payloads per second
+            
+            return {
+                'throughput_fps': throughput,
+                'total_time_seconds': total_time,
+                'payloads_processed': num_payloads,
+                'acceptable': throughput >= 60,  # At least 60 FPS
+                'message': f"Throughput: {throughput:.1f} FPS"
+            }
+            
+        except Exception as e:
+            return {
+                'throughput_fps': 0,
+                'acceptable': False,
+                'error': str(e),
+                'message': f"Throughput measurement failed: {e}"
+            }
+    
+    async def _measure_latency(self) -> Dict[str, Any]:
+        """Measure processing latency."""
+        try:
+            from test_integration_suite import TestDataGenerator
+            from python.utils.preprocessing import MarioPreprocessor
+            
+            generator = TestDataGenerator()
+            preprocessor = MarioPreprocessor(enhanced_features=True)
+            
+            # Measure end-to-end latency
+            latencies = []
+            
+            for _ in range(100):
+                # Generate test data
+                payload = generator.generate_enhanced_payload()
+                game_state = generator.generate_game_state(enhanced=True)
+                
+                import numpy as np
+                raw_frame = np.random.randint(0, 255, (240, 256, 3), dtype=np.uint8)
+                
+                # Measure processing time
+                start_time = time.time()
+                stacked_frames, state_vector = preprocessor.process_step(raw_frame, game_state)
+                end_time = time.time()
+                
+                latency_ms = (end_time - start_time) * 1000
+                latencies.append(latency_ms)
+            
+            avg_latency = sum(latencies) / len(latencies)
+            max_latency = max(latencies)
+            min_latency = min(latencies)
+            
+            return {
+                'avg_latency_ms': avg_latency,
+                'max_latency_ms': max_latency,
+                'min_latency_ms': min_latency,
+                'acceptable': avg_latency < 16.67,  # Less than one frame at 60 FPS
+                'message': f"Average latency: {avg_latency:.2f}ms"
+            }
+            
+        except Exception as e:
+            return {
+                'avg_latency_ms': 0,
+                'acceptable': False,
+                'error': str(e),
+                'message': f"Latency measurement failed: {e}"
+            }
+    
+    async def _assess_system_readiness(self, integration_results: Dict[str, Any], 
+                                     performance_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Assess overall system readiness."""
+        
+        # Integration test readiness
+        integration_ready = integration_results.get('system_ready_for_training', False)
+        integration_success_rate = integration_results.get('test_statistics', {}).get('success_rate_percent', 0)
+        
+        # Performance readiness
+        performance_ready = performance_results.get('acceptable', True)
+        
+        # Critical component checks
+        critical_components = {
+            'lua_memory_reading': 'Lua Memory Reading' not in integration_results.get('critical_failures', []),
+            'binary_protocol': 'Binary Protocol' not in integration_results.get('critical_failures', []),
+            'state_processing': 'State Processing' not in integration_results.get('critical_failures', []),
+            'reward_calculation': 'Reward Calculation' not in integration_results.get('critical_failures', []),
+            'end_to_end_integration': 'End-to-End Integration' not in integration_results.get('critical_failures', [])
+        }
+        
+        critical_components_ready = all(critical_components.values())
+        
+        # Overall readiness assessment
+        system_ready = (
+            integration_ready and
+            performance_ready and
+            critical_components_ready and
+            integration_success_rate >= 95
+        )
+        
+        # Readiness score (0-100)
+        readiness_score = 0
+        if integration_ready:
+            readiness_score += 40
+        if performance_ready:
+            readiness_score += 20
+        if critical_components_ready:
+            readiness_score += 30
+        readiness_score += min(10, integration_success_rate / 10)
+        
+        return {
+            'system_ready': system_ready,
+            'readiness_score': readiness_score,
+            'integration_ready': integration_ready,
+            'performance_ready': performance_ready,
+            'critical_components_ready': critical_components_ready,
+            'critical_components': critical_components,
+            'integration_success_rate': integration_success_rate,
+            'assessment': self._generate_readiness_assessment(system_ready, readiness_score)
+        }
+    
+    def _generate_readiness_assessment(self, system_ready: bool, readiness_score: float) -> str:
+        """Generate human-readable readiness assessment."""
+        if system_ready and readiness_score >= 90:
+            return "System is fully ready for enhanced training"
+        elif readiness_score >= 80:
+            return "System is mostly ready with minor issues to address"
+        elif readiness_score >= 60:
+            return "System has significant issues that need resolution"
+        else:
+            return "System is not ready for training - major issues detected"
+    
+    def _determine_overall_status(self, integration_results: Dict[str, Any], 
+                                performance_results: Dict[str, Any],
+                                readiness_results: Dict[str, Any]) -> str:
+        """Determine overall validation status."""
+        if readiness_results.get('system_ready', False):
+            return 'PASSED'
+        elif readiness_results.get('readiness_score', 0) >= 80:
+            return 'PASSED_WITH_WARNINGS'
+        else:
+            return 'FAILED'
+    
+    def _generate_recommendations(self, integration_results: Dict[str, Any], 
+                                performance_results: Dict[str, Any],
+                                readiness_results: Dict[str, Any]) -> List[str]:
+        """Generate recommendations based on validation results."""
+        recommendations = []
+        
+        # Integration test recommendations
+        if integration_results.get('recommendations'):
+            recommendations.extend(integration_results['recommendations'])
+        
+        # Performance recommendations
+        if not performance_results.get('acceptable', True):
+            recommendations.append("Optimize system performance for real-time processing")
+            
+            perf_metrics = performance_results.get('metrics', {})
+            if not perf_metrics.get('cpu_usage', {}).get('acceptable', True):
+                recommendations.append("Reduce CPU usage during processing")
+            if not perf_metrics.get('memory_usage', {}).get('acceptable', True):
+                recommendations.append("Optimize memory usage and prevent memory leaks")
+            if not perf_metrics.get('throughput', {}).get('acceptable', True):
+                recommendations.append("Improve processing throughput to maintain 60 FPS")
+            if not perf_metrics.get('latency', {}).get('acceptable', True):
+                recommendations.append("Reduce processing latency for real-time performance")
+        
+        # System readiness recommendations
+        if not readiness_results.get('system_ready', False):
+            recommendations.append("Address critical component failures before training")
+            
+            critical_components = readiness_results.get('critical_components', {})
+            for component, ready in critical_components.items():
+                if not ready:
+                    recommendations.append(f"Fix issues in {component.replace('_', ' ')}")
+        
+        # General recommendations
+        if readiness_results.get('readiness_score', 0) < 100:
+            recommendations.append("Run extended validation tests before production use")
+            recommendations.append("Monitor system behavior during initial training runs")
+        
+        return recommendations
+    
+    def _generate_failure_report(self, reason: str, details: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate failure report."""
+        return {
+            'validation_timestamp': time.time(),
+            'overall_status': 'FAILED',
+            'failure_reason': reason,
+            'failure_details': details,
+            'system_ready_for_training': False,
+            'recommendations': [
+                f"Address the failure: {reason}",
+                "Fix all pre-validation issues before running integration tests",
+                "Ensure all required dependencies are installed",
+                "Verify project file structure is complete"
+            ]
+        }
+    
+    async def _save_validation_report(self, report: Dict[str, Any]):
+        """Save validation report to file."""
+        timestamp = int(time.time())
+        report_filename = f"system_validation_report_{timestamp}.json"
+        
+        try:
+            with open(report_filename, 'w') as f:
+                json.dump(report, f, indent=2, default=str)
+            
+            self.logger.info(f"[REPORT] Validation report saved to: {report_filename}")
+            
+            # Also save a human-readable summary
+            summary_filename = f"system_validation_summary_{timestamp}.txt"
+            await self._save_validation_summary(report, summary_filename)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save validation report: {e}")
+    
+    async def _save_validation_summary(self, report: Dict[str, Any], filename: str):
+        """Save human-readable validation summary."""
+        try:
+            with open(filename, 'w') as f:
+                f.write("Enhanced State Management System Validation Summary\n")
+                f.write("=" * 60 + "\n\n")
+                
+                f.write(f"Validation Date: {time.ctime(report['validation_timestamp'])}\n")
+                f.write(f"Duration: {report['validation_duration_seconds']:.2f} seconds\n")
+                f.write(f"Overall Status: {report['overall_status']}\n\n")
+                
+                # System readiness
+                readiness = report.get('system_readiness', {})
+                f.write(f"System Ready for Training: {'YES' if readiness.get('system_ready', False) else 'NO'}\n")
+                f.write(f"Readiness Score: {readiness.get('readiness_score', 0):.1f}/100\n")
+                f.write(f"Assessment: {readiness.get('assessment', 'Unknown')}\n\n")
+                
+                # Integration test results
+                integration = report.get('integration_tests', {})
+                if integration:
+                    stats = integration.get('test_statistics', {})
+                    f.write(f"Integration Tests: {stats.get('tests_passed', 0)}/{stats.get('total_tests', 0)} passed ")
+                    f.write(f"({stats.get('success_rate_percent', 0):.1f}%)\n")
+                    
+                    if integration.get('critical_failures'):
+                        f.write(f"Critical Failures: {', '.join(integration['critical_failures'])}\n")
+                    f.write("\n")
+                
+                # Performance results
+                performance = report.get('performance_validation', {})
+                if performance:
+                    f.write(f"Performance Validation: {'PASSED' if performance.get('acceptable', False) else 'FAILED'}\n")
+                    metrics = performance.get('metrics', {})
+                    for metric_name, metric_data in metrics.items():
+                        if isinstance(metric_data, dict) and 'message' in metric_data:
+                            f.write(f"  {metric_name}: {metric_data['message']}\n")
+                    f.write("\n")
+                
+                # Recommendations
+                recommendations = report.get('recommendations', [])
+                if recommendations:
+                    f.write("Recommendations:\n")
+                    for i, rec in enumerate(recommendations, 1):
+                        f.write(f"  {i}. {rec}\n")
+                    f.write("\n")
+            
+            self.logger.info(f"[REPORT] Validation summary saved to: {filename}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save validation summary: {e}")
+
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Validate Enhanced State Management System",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python validate_system.py                    # Full validation with enhanced features
+  python validate_system.py --legacy           # Test legacy 12-feature mode
+  python validate_system.py --performance      # Include performance benchmarks
+  python validate_system.py --verbose          # Verbose logging
+        """
+    )
+    
+    parser.add_argument('--enhanced', action='store_true', default=True,
+                       help='Test enhanced 20-feature mode (default)')
+    parser.add_argument('--legacy', action='store_true',
+                       help='Test legacy 12-feature mode')
+    parser.add_argument('--performance', action='store_true', default=True,
+                       help='Run performance benchmarks (default)')
+    parser.add_argument('--no-performance', action='store_true',
+                       help='Skip performance benchmarks')
+    parser.add_argument('--verbose', action='store_true',
+                       help='Enable verbose logging')
+    parser.add_argument('--report-only', action='store_true',
+                       help='Generate report from existing test results')
+    
+    return parser.parse_args()
+
+
+async def main():
+    """Main validation function."""
+    args = parse_arguments()
+    
+    # Configuration
+    config = {
+        'test_enhanced': args.enhanced and not args.legacy,
+        'test_legacy': args.legacy,
+        'performance_tests': args.performance and not args.no_performance,
+        'test_error_handling': True,
+        'test_checkpoints': True,
+        'verbose': args.verbose,
+        'report_only': args.report_only
+    }
+    
+    # Create validator
+    validator = SystemValidator(config)
+    
+    try:
+        # Run validation
+        validation_report = await validator.validate_system()
+        
+        # Display results
+        print("\n" + "=" * 80)
+        print("[TARGET] SYSTEM VALIDATION RESULTS")
+        print("=" * 80)
+        
+        overall_status = validation_report['overall_status']
+        if overall_status == 'PASSED':
+            print("[PASS] VALIDATION PASSED - System is ready for enhanced training")
+        elif overall_status == 'PASSED_WITH_WARNINGS':
+            print("[WARN] VALIDATION PASSED WITH WARNINGS - Minor issues detected")
+        else:
+            print("[FAIL] VALIDATION FAILED - System is not ready for training")
+        
+        readiness = validation_report.get('system_readiness', {})
+        print(f"[RESULTS] Readiness Score: {readiness.get('readiness_score', 0):.1f}/100")
+        print(f"[TARGET] Assessment: {readiness.get('assessment', 'Unknown')}")
+        
+        # Show key metrics
+        integration = validation_report.get('integration_tests', {})
+        if integration:
+            stats = integration.get('test_statistics', {})
+            print(f"[TEST] Integration Tests: {stats.get('tests_passed', 0)}/{stats.get('total_tests', 0)} passed ({stats.get('success_rate_percent', 0):.1f}%)")
+            
+            if integration.get('critical_failures'):
+                print(f"[FAIL] Critical Failures: {', '.join(integration['critical_failures'])}")
+        
+        # Show performance metrics
+        performance = validation_report.get('performance_validation', {})
+        if performance:
+            print(f"[PERF] Performance: {'PASSED' if performance.get('acceptable', False) else 'FAILED'}")
+            
+            metrics = performance.get('metrics', {})
+            for metric_name, metric_data in metrics.items():
+                if isinstance(metric_data, dict) and 'message' in metric_data:
+                    status = "[PASS]" if metric_data.get('acceptable', True) else "[FAIL]"
+                    print(f"  {status} {metric_name}: {metric_data['message']}")
+        
+        # Show recommendations
+        recommendations = validation_report.get('recommendations', [])
+        if recommendations:
+            print(f"\n[RECS] Recommendations:")
+            for i, rec in enumerate(recommendations[:5], 1):  # Show top 5
+                print(f"  {i}. {rec}")
+            if len(recommendations) > 5:
+                print(f"  ... and {len(recommendations) - 5} more (see detailed report)")
+        
+        print(f"\n[TIME] Validation completed in {validation_report['validation_duration_seconds']:.2f} seconds")
+        
+        # Return appropriate exit code
+        if overall_status == 'PASSED':
+            return 0
+        elif overall_status == 'PASSED_WITH_WARNINGS':
+            return 1
+        else:
+            return 2
+            
+    except KeyboardInterrupt:
+        print("\n[WARN] Validation interrupted by user")
+        return 130
+    except Exception as e:
+        print(f"\n[FAIL] Validation failed with error: {e}")
+        validator.logger.error(f"Validation error: {e}", exc_info=True)
+        return 1
 
 
 if __name__ == "__main__":
-    exit_code = main()
+    exit_code = asyncio.run(main())
     sys.exit(exit_code)

@@ -1,0 +1,261 @@
+{
+  "validation_timestamp": 1759130355.7368174,
+  "validation_duration_seconds": 3.58986759185791,
+  "configuration": {
+    "test_enhanced": true,
+    "test_legacy": false,
+    "performance_tests": true,
+    "test_error_handling": true,
+    "test_checkpoints": true,
+    "verbose": false,
+    "report_only": false
+  },
+  "pre_validation": {
+    "passed": true,
+    "checks": {
+      "python_version": {
+        "passed": true,
+        "message": "Python 3.13.1 is compatible",
+        "version": "3.13.1"
+      },
+      "dependencies": {
+        "passed": true,
+        "available_packages": [
+          "torch (2.7.1+cu118)",
+          "numpy (2.2.6)",
+          "websockets (15.0.1)",
+          "asyncio",
+          "cv2 (4.12.0)"
+        ],
+        "missing_packages": [],
+        "message": "5/5 required packages available"
+      },
+      "file_structure": {
+        "passed": true,
+        "existing_files": [
+          "lua/mario_ai.lua",
+          "python/utils/preprocessing.py",
+          "python/environment/reward_calculator.py",
+          "python/communication/websocket_server.py",
+          "python/communication/comm_manager.py",
+          "python/models/dueling_dqn.py",
+          "python/agents/dqn_agent.py"
+        ],
+        "missing_files": [],
+        "message": "7/7 required files found"
+      },
+      "configuration_files": {
+        "passed": true,
+        "config_status": {
+          "config/training_config.yaml": {
+            "exists": true,
+            "valid": true,
+            "keys": [
+              "training",
+              "performance",
+              "checkpointing",
+              "network",
+              "enhanced_memory",
+              "enhanced_rewards"
+            ]
+          },
+          "config/network_config.yaml": {
+            "exists": true,
+            "valid": true,
+            "keys": [
+              "network",
+              "variants",
+              "websocket",
+              "communication",
+              "enhanced_features",
+              "enhanced_communication"
+            ]
+          }
+        },
+        "message": "Configuration files validation: passed"
+      }
+    },
+    "summary": "4/4 checks passed"
+  },
+  "integration_tests": {
+    "overall_status": "PASSED",
+    "system_ready_for_training": true,
+    "execution_time_seconds": 1.1936707496643066,
+    "test_statistics": {
+      "total_tests": 31,
+      "tests_passed": 31,
+      "tests_failed": 0,
+      "success_rate_percent": 100.0
+    },
+    "category_results": {
+      "Lua Memory Reading": {
+        "status": "PASSED",
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Enhanced memory addresses validated",
+          "[PASS] 128-byte payload generation validated",
+          "[PASS] Enhanced feature flags validated"
+        ]
+      },
+      "Binary Protocol": {
+        "status": "PASSED",
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Binary payload parsing validated",
+          "[PASS] Payload validation passed",
+          "[PASS] WebSocket protocol simulation passed"
+        ]
+      },
+      "State Processing": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] 12-feature mode processing validated",
+          "[PASS] 20-feature mode processing validated",
+          "[PASS] Frame stacking with variable state sizes validated",
+          "[PASS] Mario preprocessor integration validated"
+        ]
+      },
+      "Reward Calculation": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Basic reward calculation validated",
+          "[PASS] Enhanced reward calculation validated",
+          "[PASS] Death penalty calculation validated",
+          "[PASS] Reward component validation passed"
+        ]
+      },
+      "Configuration Switching": {
+        "status": "PASSED",
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Dynamic feature switching validated",
+          "[PASS] Backward compatibility validated",
+          "[PASS] Configuration validation passed"
+        ]
+      },
+      "Error Handling": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Malformed payload handling validated",
+          "[PASS] Invalid state data handling validated",
+          "[PASS] Communication error recovery validated",
+          "[PASS] Graceful degradation validated"
+        ]
+      },
+      "Performance Benchmarks": {
+        "status": "PASSED",
+        "tests_passed": 4,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Payload parsing performance: 0.006ms per payload",
+          "[PASS] State normalization performance: 0.004ms per state",
+          "[PASS] Reward calculation performance: 0.003ms per calculation",
+          "[PASS] Memory usage validation: +0.1MB"
+        ]
+      },
+      "Checkpoint Compatibility": {
+        "status": "PASSED",
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Model architecture compatibility validated",
+          "[PASS] Checkpoint loading compatibility validated",
+          "[PASS] Training state migration validated"
+        ]
+      },
+      "End-to-End Integration": {
+        "status": "PASSED",
+        "tests_passed": 3,
+        "tests_failed": 0,
+        "details": [
+          "[PASS] Complete pipeline simulation validated",
+          "[PASS] Multi-frame sequence processing validated",
+          "[PASS] System stress test: 2261 FPS"
+        ]
+      }
+    },
+    "performance_metrics": {
+      "payload_parsing_ms": 0.006287813186645508,
+      "state_normalization_ms": 0.003884553909301758,
+      "reward_calculation_ms": 0.0033202171325683594,
+      "memory_usage_mb": 0.14453125,
+      "max_fps": 2261
+    },
+    "critical_failures": [],
+    "validation_errors": [],
+    "recommendations": [],
+    "system_assessment": {
+      "enhanced_features_functional": true,
+      "backward_compatibility_maintained": true,
+      "performance_acceptable": true,
+      "error_handling_robust": true,
+      "integration_complete": true
+    },
+    "next_steps": [
+      "System is ready for enhanced training",
+      "Begin training with enhanced 20-feature mode",
+      "Monitor performance and adjust configurations as needed",
+      "Collect training metrics for further optimization"
+    ]
+  },
+  "performance_validation": {
+    "acceptable": true,
+    "metrics": {
+      "cpu_usage": {
+        "cpu_usage_percent": 0,
+        "processing_time_seconds": 0.1751863956451416,
+        "acceptable": true,
+        "message": "CPU usage: 0.0%"
+      },
+      "memory_usage": {
+        "memory_usage_mb": 0.0,
+        "memory_before_mb": 390.1953125,
+        "memory_after_mb": 390.1953125,
+        "acceptable": true,
+        "message": "Memory usage increase: 0.0MB"
+      },
+      "throughput": {
+        "throughput_fps": 9610.022660046603,
+        "total_time_seconds": 0.10405802726745605,
+        "payloads_processed": 1000,
+        "acceptable": true,
+        "message": "Throughput: 9610.0 FPS"
+      },
+      "latency": {
+        "avg_latency_ms": 0.11515617370605469,
+        "max_latency_ms": 0.2779960632324219,
+        "min_latency_ms": 0.09298324584960938,
+        "acceptable": true,
+        "message": "Average latency: 0.12ms"
+      }
+    },
+    "summary": "Performance validation passed"
+  },
+  "system_readiness": {
+    "system_ready": true,
+    "readiness_score": 100,
+    "integration_ready": true,
+    "performance_ready": true,
+    "critical_components_ready": true,
+    "critical_components": {
+      "lua_memory_reading": true,
+      "binary_protocol": true,
+      "state_processing": true,
+      "reward_calculation": true,
+      "end_to_end_integration": true
+    },
+    "integration_success_rate": 100.0,
+    "assessment": "System is fully ready for enhanced training"
+  },
+  "overall_status": "PASSED",
+  "recommendations": []
+}

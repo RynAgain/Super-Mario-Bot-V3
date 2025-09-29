@@ -19,7 +19,7 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from python.training.trainer import MarioTrainer
-from python.logging.plotter import PerformancePlotter
+from python.mario_logging.plotter import PerformancePlotter
 from python.training.training_utils import TrainingStateManager
 from python.utils.config_loader import ConfigLoader
 
@@ -78,8 +78,8 @@ async def start_training(args):
         
         # Setup signal handler for graceful shutdown
         def signal_handler(signum, frame):
-            logger.info(f"Received signal {signum}, stopping training...")
-            asyncio.create_task(trainer.stop_training())
+            logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+            trainer.should_stop = True
         
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -327,7 +327,12 @@ def validate_config(args):
     try:
         config_path = args.config or "config/training_config.yaml"
         config_loader = ConfigLoader()
-        config = config_loader.load_config(config_path)
+        # Extract just the filename if a full path is provided
+        if "/" in config_path or "\\" in config_path:
+            config_filename = config_path.split("/")[-1].split("\\")[-1]
+        else:
+            config_filename = config_path
+        config = config_loader.load_config(config_filename)
         
         print(f"Configuration file: {config_path}")
         print("Configuration validation: PASSED")
@@ -358,10 +363,14 @@ def validate_config(args):
         print(f"  Mixed Precision: {performance_config.get('mixed_precision', 'Not set')}")
         print(f"  Compile Model: {performance_config.get('compile_model', 'Not set')}")
         
+        # Check both network and websocket config sections
         network_config = config.get('network', {})
+        websocket_config = config.get('websocket', {})
         print("\nNetwork Configuration:")
-        print(f"  Host: {network_config.get('host', 'Not set')}")
-        print(f"  Port: {network_config.get('port', 'Not set')}")
+        host = websocket_config.get('host') or network_config.get('host', 'Not set')
+        port = websocket_config.get('port') or network_config.get('port', 'Not set')
+        print(f"  Host: {host}")
+        print(f"  Port: {port}")
         
     except Exception as e:
         print(f"Configuration validation failed: {e}")

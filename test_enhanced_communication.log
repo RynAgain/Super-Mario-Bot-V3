@@ -1,0 +1,53 @@
+2025-09-29 01:58:09,526 - python.utils.config_loader - INFO - Loaded configuration: training_config.yaml
+2025-09-29 01:58:09,548 - python.utils.config_loader - INFO - Loaded configuration: network_config.yaml
+2025-09-29 01:58:09,570 - python.utils.config_loader - INFO - Loaded configuration: game_config.yaml
+2025-09-29 01:58:09,581 - python.utils.config_loader - INFO - Loaded configuration: logging_config.yaml
+2025-09-29 01:58:09,582 - python.utils.config_loader - INFO - Validating configuration...
+2025-09-29 01:58:09,582 - python.utils.config_loader - INFO - Configuration validation completed successfully
+2025-09-29 01:58:09,583 - __main__ - INFO - Configuration loaded successfully
+2025-09-29 01:58:09,583 - __main__ - INFO - Starting enhanced communication protocol tests...
+2025-09-29 01:58:09,583 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,583 - __main__ - INFO - Running test: Binary Payload Parser
+2025-09-29 01:58:09,583 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,584 - __main__ - INFO - Testing binary payload parser...
+2025-09-29 01:58:09,584 - __main__ - INFO - Binary payload parsing test passed - parsed 42 state fields
+2025-09-29 01:58:09,620 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,620 - __main__ - INFO - Running test: Enhanced Feature Validator
+2025-09-29 01:58:09,620 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,620 - __main__ - INFO - Testing enhanced feature validator...
+2025-09-29 01:58:09,621 - __main__ - INFO - Enhanced feature validation test passed
+2025-09-29 01:58:09,623 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,623 - __main__ - INFO - Running test: Enhanced Reward Calculator
+2025-09-29 01:58:09,623 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,623 - __main__ - INFO - Testing enhanced reward calculator...
+2025-09-29 01:58:09,624 - __main__ - INFO - Enhanced reward calculation test passed - reward: 127.000
+2025-09-29 01:58:09,624 - __main__ - INFO - Reward components: {'distance_reward': 50.0, 'completion_reward': 0.0, 'powerup_reward': 0.0, 'enemy_reward': 0.0, 'score_reward': 0.0, 'coin_reward': 0.0, 'death_penalty': 0.0, 'movement_penalty': 0.0, 'stuck_penalty': 0.0, 'powerup_collection_reward': 50.0, 'enemy_elimination_reward': 25.0, 'environmental_navigation_reward': 0.0, 'velocity_movement_reward': 0.0, 'strategic_positioning_reward': 2.0, 'enhanced_death_penalty': 0.0, 'total': 127.0}
+2025-09-29 01:58:09,625 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,626 - __main__ - INFO - Running test: WebSocket Server Enhanced Features
+2025-09-29 01:58:09,626 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,626 - __main__ - INFO - Testing WebSocket server enhanced features...
+2025-09-29 01:58:09,626 - __main__ - INFO - WebSocket server enhanced features test passed
+2025-09-29 01:58:09,627 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,627 - __main__ - INFO - Running test: Communication Manager Enhanced Features
+2025-09-29 01:58:09,627 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,627 - __main__ - INFO - Testing communication manager enhanced features...
+2025-09-29 01:58:09,628 - __main__ - INFO - Communication manager enhanced features test passed
+2025-09-29 01:58:09,629 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,629 - __main__ - INFO - Running test: Backward Compatibility
+2025-09-29 01:58:09,629 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,629 - __main__ - INFO - Testing backward compatibility...
+2025-09-29 01:58:09,630 - python.communication.websocket_server - INFO - Enhanced features disabled
+2025-09-29 01:58:09,630 - __main__ - INFO - Backward compatibility test passed
+2025-09-29 01:58:09,631 - __main__ - INFO - 
+============================================================
+2025-09-29 01:58:09,632 - __main__ - INFO - TEST RESULTS
+2025-09-29 01:58:09,632 - __main__ - INFO - ============================================================
+2025-09-29 01:58:09,632 - __main__ - INFO - Passed: 6
+2025-09-29 01:58:09,632 - __main__ - INFO - Failed: 0
+2025-09-29 01:58:09,632 - __main__ - INFO - Total:  6

@@ -1,12 +1,12 @@
 """
 Dueling DQN Neural Network Model for Super Mario Bros AI
 
-This module implements the Dueling DQN architecture with 8-frame stacking
+This module implements the Dueling DQN architecture with 4-frame stacking
 for temporal understanding and improved action-value estimation.
 
 Architecture:
 - Convolutional layers for visual processing (84x84 grayscale frames)
-- Frame stacking support (8 frames)
+- Frame stacking support (4 frames, optimized for performance)
 - Separate value and advantage streams (dueling architecture)
 - 12-action output space matching the Lua script
 - GPU acceleration support
@@ -21,7 +21,7 @@ from typing import Tuple, Optional
 
 class DuelingDQN(nn.Module):
     """
-    Dueling DQN implementation with 8-frame stacking and game state fusion.
+    Dueling DQN implementation with 4-frame stacking and game state fusion.
     
     The network processes stacked frames through convolutional layers,
     fuses them with game state features, and uses dueling architecture
@@ -32,7 +32,7 @@ class DuelingDQN(nn.Module):
         self,
         num_actions: int = 12,
         state_vector_size: int = 12,
-        frame_stack_size: int = 8,
+        frame_stack_size: int = 4,
         frame_size: Tuple[int, int] = (84, 84)
     ):
         """
@@ -41,7 +41,7 @@ class DuelingDQN(nn.Module):
         Args:
             num_actions: Number of possible actions (12 for Mario)
             state_vector_size: Size of game state vector (12 features)
-            frame_stack_size: Number of frames to stack (8 frames)
+            frame_stack_size: Number of frames to stack (4 frames)
             frame_size: Frame dimensions (height, width) = (84, 84)
         """
         super(DuelingDQN, self).__init__()
@@ -53,7 +53,7 @@ class DuelingDQN(nn.Module):
         
         # Convolutional layers for frame processing
         self.conv1 = nn.Conv2d(
-            in_channels=frame_stack_size,  # 8 stacked frames
+            in_channels=frame_stack_size,  # 4 stacked frames
             out_channels=32,
             kernel_size=8,
             stride=4,
@@ -103,7 +103,7 @@ class DuelingDQN(nn.Module):
         """
         Calculate the output size after convolutional layers.
         
-        Input: (8, 84, 84)
+        Input: (4, 84, 84)
         After conv1 (8x8, stride=4, pad=2): (32, 21, 21)
         After conv2 (4x4, stride=2, pad=1): (64, 11, 11)
         After conv3 (3x3, stride=1, pad=1): (64, 11, 11)
@@ -136,7 +136,7 @@ class DuelingDQN(nn.Module):
         Forward pass through the Dueling DQN.
         
         Args:
-            frames: Stacked frames tensor of shape (batch_size, 8, 84, 84)
+            frames: Stacked frames tensor of shape (batch_size, 4, 84, 84)
             state_vector: Game state vector of shape (batch_size, 12)
             
         Returns:
@@ -149,8 +149,8 @@ class DuelingDQN(nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         
-        # Flatten convolutional output
-        conv_features = x.view(batch_size, -1)
+        # Flatten convolutional output (ensure contiguous memory layout)
+        conv_features = x.contiguous().view(batch_size, -1)
         
         # Fuse convolutional features with state vector
         fused_features = torch.cat([conv_features, state_vector], dim=1)
@@ -224,7 +224,7 @@ class DuelingDQNConfig:
         # Network architecture
         self.num_actions = 12
         self.state_vector_size = 12
-        self.frame_stack_size = 8
+        self.frame_stack_size = 4
         self.frame_size = (84, 84)
         
         # Convolutional layers
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     
     # Test forward pass
     batch_size = 4
-    frames = torch.randn(batch_size, 8, 84, 84).to(device)
+    frames = torch.randn(batch_size, 4, 84, 84).to(device)
     state_vector = torch.randn(batch_size, 12).to(device)
     
     q_values = model(frames, state_vector)

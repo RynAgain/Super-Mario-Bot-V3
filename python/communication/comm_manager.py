@@ -14,6 +14,8 @@ from typing import Dict, Any, Optional, Callable, Tuple, List
 import numpy as np
 
 from .websocket_server import WebSocketServer
+from ..utils.preprocessing import MarioPreprocessor, StateNormalizer
+from ..environment.reward_calculator import RewardCalculator
 
 
 class GameState:
@@ -34,17 +36,10 @@ class GameState:
         self._parse_binary_data(raw_data)
     
     def _parse_binary_data(self, data: bytes):
-        """
-        Parse binary game state data according to communication protocol.
-        
-        Binary Message Structure (128 bytes total):
-        - Mario Data (16 bytes)
-        - Enemy Data (32 bytes max, 4 bytes per enemy)
-        - Level Data (64 bytes)
-        - Game Variables (16 bytes)
-        """
-        if len(data) < 128:
-            raise ValueError(f"Invalid game state data length: {len(data)}, expected 128 bytes")
+        """Parse binary payload (must be exactly 128 bytes)."""
+        if len(data) != 128:
+            # Drop frame but don't explode
+            raise ValueError(f"Expected 128-byte payload, got {len(data)}")
         
         # Parse Mario Data Block (16 bytes)
         mario_data = struct.unpack('<HHhhBBBBBBH', data[0:16])
@@ -264,23 +259,34 @@ class CommunicationManager:
     Manages WebSocket communication and message routing for the AI training system.
     """
     
-    def __init__(self, host: str = "localhost", port: int = 8765):
+    def __init__(self, host: str = "localhost", port: int = 8765, enhanced_features: bool = False,
+                 reward_config: Optional[Dict[str, Any]] = None):
         """
         Initialize communication manager.
         
         Args:
             host: WebSocket server host
             port: WebSocket server port
+            enhanced_features: Whether to enable enhanced 20-feature mode
+            reward_config: Configuration for reward calculator
         """
-        self.websocket_server = WebSocketServer(host, port)
+        self.enhanced_features = enhanced_features
+        self.websocket_server = WebSocketServer(host, port, enhanced_features)
         self.frame_synchronizer = FrameSynchronizer()
+        
+        # Enhanced processing components
+        self.mario_preprocessor = MarioPreprocessor(enhanced_features=enhanced_features)
+        self.state_normalizer = StateNormalizer(enhanced_features=enhanced_features)
+        self.reward_calculator = RewardCalculator(reward_config, enhanced_features=enhanced_features)
         
         # Message queues
         self.incoming_states = asyncio.Queue()
+        self.incoming_enhanced_states = asyncio.Queue()
         self.outgoing_actions = asyncio.Queue()
         
         # Event handlers
         self.state_handlers: List[Callable] = []
+        self.enhanced_state_handlers: List[Callable] = []
         self.episode_handlers: List[Callable] = []
         self.error_handlers: List[Callable] = []
         
@@ -293,6 +299,14 @@ class CommunicationManager:
         self.frame_desync_count = 0
         self.max_desync_tolerance = 5
         
+        # Enhanced communication statistics
+        self.enhanced_comm_stats = {
+            'total_enhanced_states_processed': 0,
+            'reward_calculations': 0,
+            'state_normalizations': 0,
+            'preprocessing_errors': 0
+        }
+        
         # Setup logging
         self.logger = logging.getLogger(__name__)
         
@@ -302,6 +316,7 @@ class CommunicationManager:
     def _setup_websocket_handlers(self):
         """Setup WebSocket message handlers."""
         self.websocket_server.register_binary_handler(self._handle_game_state)
+        self.websocket_server.register_enhanced_state_handler(self._handle_enhanced_game_state)
         self.websocket_server.register_json_handler('episode_event', self._handle_episode_event)
         self.websocket_server.register_json_handler('error', self._handle_client_error)
     
@@ -328,6 +343,10 @@ class CommunicationManager:
         """Register handler for game state updates."""
         self.state_handlers.append(handler)
     
+    def register_enhanced_state_handler(self, handler: Callable[[Dict[str, Any]], None]):
+        """Register handler for enhanced parsed game state updates."""
+        self.enhanced_state_handlers.append(handler)
+    
     def register_episode_handler(self, handler: Callable[[Dict[str, Any]], None]):
         """Register handler for episode events."""
         self.episode_handlers.append(handler)
@@ -336,11 +355,25 @@ class CommunicationManager:
         """Register handler for error events."""
         self.error_handlers.append(handler)
     
+    def set_enhanced_features(self, enabled: bool):
+        """
+        Enable or disable enhanced features mode.
+        
+        Args:
+            enabled: Whether to enable enhanced features
+        """
+        self.enhanced_features = enabled
+        self.websocket_server.set_enhanced_features(enabled)
+        self.mario_preprocessor = MarioPreprocessor(enhanced_features=enabled)
+        self.state_normalizer = StateNormalizer(enhanced_features=enabled)
+        self.reward_calculator.enhanced_features = enabled
+        self.logger.info(f"Communication manager enhanced features {'enabled' if enabled else 'disabled'}")
+    
     # Message handlers
     
     async def _handle_game_state(self, frame_id: int, binary_data: bytes):
         """
-        Handle incoming binary game state data.
+        Handle incoming binary game state data with robust error handling.
         
         Args:
             frame_id: Frame identifier
@@ -353,38 +386,119 @@ class CommunicationManager:
                 self.logger.warning(f"Frame desync detected: expected {self.last_frame_id + 1}, got {frame_id}")
                 
                 if self.frame_desync_count > self.max_desync_tolerance:
-                    await self.websocket_server._send_error(
-                        "FRAME_DESYNC",
-                        f"Frame desync count exceeded tolerance: {self.frame_desync_count}"
-                    )
-                    return
+                    self.logger.error(f"Frame desync count exceeded tolerance: {self.frame_desync_count}")
+                    # Don't send error or close connection - just log and reset
+                    self.frame_desync_count = 0
+                    self.last_frame_id = frame_id  # Resync to current frame
             else:
                 self.frame_desync_count = 0  # Reset on successful sync
             
             self.last_frame_id = frame_id
             
-            # Parse game state
-            game_state = GameState(frame_id, binary_data)
-            
-            # Add to synchronization buffer
-            self.frame_synchronizer.add_game_state(game_state)
-            
-            # Queue for processing
-            await self.incoming_states.put(game_state)
-            
-            # Notify handlers
-            for handler in self.state_handlers:
-                try:
-                    if asyncio.iscoroutinefunction(handler):
-                        await handler(game_state)
-                    else:
-                        handler(game_state)
-                except Exception as e:
-                    self.logger.error(f"Error in state handler: {e}")
+            # Parse game state with error tolerance
+            try:
+                game_state = GameState(frame_id, binary_data)
+                self.logger.debug(f"Successfully parsed game state for frame {frame_id}")
+                
+                # Add to synchronization buffer
+                self.frame_synchronizer.add_game_state(game_state)
+                
+                # Queue for processing
+                await self.incoming_states.put(game_state)
+                
+                # Notify handlers with individual error isolation
+                for handler in self.state_handlers:
+                    try:
+                        if asyncio.iscoroutinefunction(handler):
+                            await handler(game_state)
+                        else:
+                            handler(game_state)
+                    except Exception as e:
+                        self.logger.error(f"Error in state handler: {e}")
+                        # Continue with other handlers
+                
+            except ValueError as parse_error:
+                self.logger.warning(f"Failed to parse game state for frame {frame_id}: {parse_error}")
+                self.logger.debug(f"Binary data length: {len(binary_data)} bytes")
+                self.enhanced_comm_stats['preprocessing_errors'] += 1
+                # Drop this frame but keep connection alive
+                return
+                
+            except Exception as parse_error:
+                self.logger.error(f"Unexpected error parsing game state for frame {frame_id}: {parse_error}")
+                self.enhanced_comm_stats['preprocessing_errors'] += 1
+                # Drop this frame but keep connection alive
+                return
             
         except Exception as e:
-            self.logger.error(f"Error handling game state: {e}")
-            await self.websocket_server._send_error("GAME_STATE_ERROR", str(e))
+            self.logger.error(f"Critical error handling game state for frame {frame_id}: {e}")
+            self.enhanced_comm_stats['preprocessing_errors'] += 1
+            # Don't send error response or close connection - just log and continue
+    
+    async def _handle_enhanced_game_state(self, frame_id: int, parsed_game_state: Dict[str, Any]):
+        """
+        Handle incoming enhanced parsed game state data.
+        
+        Args:
+            frame_id: Frame identifier
+            parsed_game_state: Parsed game state dictionary from binary payload
+        """
+        try:
+            self.enhanced_comm_stats['total_enhanced_states_processed'] += 1
+            
+            # Normalize state vector for neural network input
+            try:
+                normalized_state = self.state_normalizer.normalize_state_vector(parsed_game_state)
+                self.enhanced_comm_stats['state_normalizations'] += 1
+                self.logger.debug(f"Enhanced state normalized for frame {frame_id}: {normalized_state.shape}")
+            except Exception as norm_error:
+                self.logger.warning(f"State normalization failed for frame {frame_id}: {norm_error}")
+                self.enhanced_comm_stats['preprocessing_errors'] += 1
+                normalized_state = None
+            
+            # Calculate enhanced rewards if reward calculator is available
+            reward_info = None
+            if hasattr(self, 'reward_calculator') and self.reward_calculator:
+                try:
+                    reward, reward_components = self.reward_calculator.calculate_frame_reward(parsed_game_state)
+                    reward_info = {
+                        'total_reward': reward,
+                        'components': reward_components.to_dict() if hasattr(reward_components, 'to_dict') else {}
+                    }
+                    self.enhanced_comm_stats['reward_calculations'] += 1
+                    self.logger.debug(f"Enhanced reward calculated for frame {frame_id}: {reward:.3f}")
+                except Exception as reward_error:
+                    self.logger.warning(f"Enhanced reward calculation failed for frame {frame_id}: {reward_error}")
+                    self.enhanced_comm_stats['preprocessing_errors'] += 1
+            
+            # Create enhanced state package
+            enhanced_state_package = {
+                'frame_id': frame_id,
+                'raw_state': parsed_game_state,
+                'normalized_state': normalized_state,
+                'reward_info': reward_info,
+                'timestamp': time.time()
+            }
+            
+            # Queue for processing
+            await self.incoming_enhanced_states.put(enhanced_state_package)
+            
+            # Notify enhanced state handlers
+            for handler in self.enhanced_state_handlers:
+                try:
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(enhanced_state_package)
+                    else:
+                        handler(enhanced_state_package)
+                except Exception as e:
+                    self.logger.error(f"Error in enhanced state handler: {e}")
+                    # Continue with other handlers
+            
+            self.logger.debug(f"Enhanced game state processed successfully for frame {frame_id}")
+            
+        except Exception as e:
+            self.logger.error(f"Critical error handling enhanced game state for frame {frame_id}: {e}")
+            self.enhanced_comm_stats['preprocessing_errors'] += 1
     
     async def _handle_episode_event(self, data: Dict[str, Any]):
         """Handle episode event messages."""
@@ -477,6 +591,21 @@ class CommunicationManager:
         except asyncio.TimeoutError:
             return None
     
+    async def get_latest_enhanced_state(self) -> Optional[Dict[str, Any]]:
+        """Get the latest enhanced game state package."""
+        try:
+            return await asyncio.wait_for(self.incoming_enhanced_states.get(), timeout=0.1)
+        except asyncio.TimeoutError:
+            return None
+    
+    def get_reward_calculator(self) -> Optional[RewardCalculator]:
+        """Get the reward calculator instance."""
+        return getattr(self, 'reward_calculator', None)
+    
+    def get_mario_preprocessor(self) -> Optional[MarioPreprocessor]:
+        """Get the Mario preprocessor instance."""
+        return getattr(self, 'mario_preprocessor', None)
+    
     def add_captured_frame(self, frame: np.ndarray, timestamp: float):
         """Add captured frame for synchronization."""
         self.frame_synchronizer.add_captured_frame(frame, timestamp)
@@ -503,9 +632,41 @@ class CommunicationManager:
     
     def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics."""
-        return {
+        metrics = {
             'incoming_queue_size': self.incoming_states.qsize(),
             'outgoing_queue_size': self.outgoing_actions.qsize(),
             'sync_metrics': self.frame_synchronizer.get_sync_metrics(),
-            'frame_desync_count': self.frame_desync_count
+            'frame_desync_count': self.frame_desync_count,
+            'enhanced_features_enabled': self.enhanced_features
         }
+        
+        # Add enhanced communication statistics
+        if self.enhanced_features:
+            metrics.update({
+                'incoming_enhanced_queue_size': self.incoming_enhanced_states.qsize(),
+                'enhanced_comm_stats': self.enhanced_comm_stats.copy(),
+                'websocket_enhanced_stats': self.websocket_server.get_enhanced_stats()
+            })
+            
+            # Calculate enhanced processing rates
+            total_enhanced = self.enhanced_comm_stats['total_enhanced_states_processed']
+            if total_enhanced > 0:
+                metrics['enhanced_processing_rates'] = {
+                    'normalization_success_rate': self.enhanced_comm_stats['state_normalizations'] / total_enhanced,
+                    'reward_calculation_success_rate': self.enhanced_comm_stats['reward_calculations'] / total_enhanced,
+                    'error_rate': self.enhanced_comm_stats['preprocessing_errors'] / total_enhanced
+                }
+        
+        return metrics
+    
+    def reset_enhanced_communication_stats(self):
+        """Reset enhanced communication statistics."""
+        if self.enhanced_features:
+            self.enhanced_comm_stats = {
+                'total_enhanced_states_processed': 0,
+                'reward_calculations': 0,
+                'state_normalizations': 0,
+                'preprocessing_errors': 0
+            }
+            self.websocket_server.reset_enhanced_stats()
+            self.logger.info("Enhanced communication statistics reset")

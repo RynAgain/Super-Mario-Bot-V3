@@ -43,12 +43,23 @@ class RewardComponents:
     movement_penalty: float = 0.0
     stuck_penalty: float = 0.0
     
+    # Enhanced reward components
+    powerup_collection_reward: float = 0.0
+    enemy_elimination_reward: float = 0.0
+    environmental_navigation_reward: float = 0.0
+    velocity_movement_reward: float = 0.0
+    strategic_positioning_reward: float = 0.0
+    enhanced_death_penalty: float = 0.0
+    
     @property
     def total(self) -> float:
         """Calculate total reward."""
         return (self.distance_reward + self.completion_reward + self.powerup_reward +
                 self.enemy_reward + self.score_reward + self.coin_reward +
-                self.death_penalty + self.movement_penalty + self.stuck_penalty)
+                self.death_penalty + self.movement_penalty + self.stuck_penalty +
+                self.powerup_collection_reward + self.enemy_elimination_reward +
+                self.environmental_navigation_reward + self.velocity_movement_reward +
+                self.strategic_positioning_reward + self.enhanced_death_penalty)
     
     def to_dict(self) -> Dict[str, float]:
         """Convert to dictionary."""
@@ -62,6 +73,12 @@ class RewardComponents:
             'death_penalty': self.death_penalty,
             'movement_penalty': self.movement_penalty,
             'stuck_penalty': self.stuck_penalty,
+            'powerup_collection_reward': self.powerup_collection_reward,
+            'enemy_elimination_reward': self.enemy_elimination_reward,
+            'environmental_navigation_reward': self.environmental_navigation_reward,
+            'velocity_movement_reward': self.velocity_movement_reward,
+            'strategic_positioning_reward': self.strategic_positioning_reward,
+            'enhanced_death_penalty': self.enhanced_death_penalty,
             'total': self.total
         }
 
@@ -76,13 +93,16 @@ class RewardCalculator:
     - Penalties (5%): Death, backward movement, getting stuck
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, enhanced_features: bool = False):
         """
         Initialize reward calculator.
         
         Args:
             config: Reward configuration parameters
+            enhanced_features: Whether to use enhanced 20-feature reward calculation
         """
+        self.enhanced_features = enhanced_features
+        
         # Default configuration
         self.config = {
             'primary': {
@@ -107,12 +127,65 @@ class RewardCalculator:
                 'curriculum_enabled': True,
                 'adaptive_scaling': True,
                 'reward_clipping': [-2000, 2000]
+            },
+            # Enhanced reward configuration
+            'enhanced': {
+                'enabled': enhanced_features,
+                'powerup_collection_reward': 50.0,
+                'enemy_elimination_reward': 25.0,
+                'environmental_navigation_reward': 5.0,
+                'velocity_movement_multiplier': 0.1,
+                'strategic_positioning_reward': 2.0,
+                'safe_distance_threshold': 100.0,
+                'pit_avoidance_reward': 10.0,
+                'obstacle_navigation_reward': 5.0,
+                'forward_momentum_threshold': 10.0,
+                # Enhanced death penalties
+                'pit_death_penalty': -100.0,
+                'enemy_collision_penalty': -50.0,
+                'time_death_penalty': -25.0,
+                'general_death_penalty': -10.0,
+                # Feature weights
+                'feature_weights': {
+                    'powerup_collection': 1.0,
+                    'enemy_elimination': 1.0,
+                    'environmental_awareness': 1.0,
+                    'velocity_movement': 1.0,
+                    'strategic_positioning': 1.0
+                }
             }
         }
         
         # Update with provided config
         if config:
             self._update_config(self.config, config)
+            
+            # Load enhanced reward configuration if available
+            if 'enhanced_rewards' in config and enhanced_features:
+                enhanced_config = config['enhanced_rewards']
+                self.config['enhanced'].update({
+                    'enabled': enhanced_config.get('enabled', enhanced_features),
+                    'powerup_collection_reward': enhanced_config.get('powerup_collection_reward', 50.0),
+                    'enemy_elimination_reward': enhanced_config.get('enemy_elimination_reward', 25.0),
+                    'environmental_navigation_reward': enhanced_config.get('environmental_navigation_reward', 5.0),
+                    'velocity_movement_multiplier': enhanced_config.get('velocity_movement_multiplier', 0.1),
+                    'strategic_positioning_reward': enhanced_config.get('strategic_positioning_reward', 2.0),
+                    'safe_distance_threshold': enhanced_config.get('safe_distance_threshold', 100.0),
+                    'pit_avoidance_reward': enhanced_config.get('pit_avoidance_reward', 10.0),
+                    'obstacle_navigation_reward': enhanced_config.get('obstacle_navigation_reward', 5.0),
+                    'forward_momentum_threshold': enhanced_config.get('forward_momentum_threshold', 10.0),
+                    'pit_death_penalty': enhanced_config.get('pit_death_penalty', -100.0),
+                    'enemy_collision_penalty': enhanced_config.get('enemy_collision_penalty', -50.0),
+                    'time_death_penalty': enhanced_config.get('time_death_penalty', -25.0),
+                    'general_death_penalty': enhanced_config.get('general_death_penalty', -10.0),
+                    'feature_weights': enhanced_config.get('feature_weights', {
+                        'powerup_collection': 1.0,
+                        'enemy_elimination': 1.0,
+                        'environmental_awareness': 1.0,
+                        'velocity_movement': 1.0,
+                        'strategic_positioning': 1.0
+                    })
+                })
         
         # State tracking
         self.previous_state: Optional[Dict[str, Any]] = None
@@ -120,6 +193,12 @@ class RewardCalculator:
         self.frames_stuck = 0
         self.last_x_position = 0
         self.progress_milestones_reached = set()
+        
+        # Enhanced state tracking
+        self.previous_power_state = 0
+        self.previous_enemy_count = 0
+        self.previous_powerup_present = False
+        self.last_safe_distance_frames = 0
         
         # Episode tracking
         self.episode_start_time = None
@@ -131,7 +210,13 @@ class RewardCalculator:
             'avg_episode_reward': 0.0,
             'max_episode_reward': float('-inf'),
             'min_episode_reward': float('inf'),
-            'reward_components_avg': {}
+            'reward_components_avg': {},
+            'enhanced_reward_stats': {
+                'powerup_collections': 0,
+                'enemy_eliminations': 0,
+                'pit_avoidances': 0,
+                'safe_positioning_frames': 0
+            }
         }
         
         # Setup logging
@@ -160,11 +245,18 @@ class RewardCalculator:
         self.episode_start_time = initial_state.get('timestamp', 0)
         self.episode_rewards.clear()
         
+        # Reset enhanced state tracking
+        if self.enhanced_features:
+            self.previous_power_state = initial_state.get('power_state', 0)
+            self.previous_enemy_count = initial_state.get('enemy_count', 0)
+            self.previous_powerup_present = initial_state.get('powerup_present', False)
+            self.last_safe_distance_frames = 0
+        
         self.logger.debug("Episode reset")
     
     def calculate_frame_reward(self, current_state: Dict[str, Any]) -> Tuple[float, RewardComponents]:
         """
-        Calculate reward for current frame based on state changes.
+        Calculate reward for current frame with enhanced features support.
         
         Args:
             current_state: Current game state
@@ -177,46 +269,48 @@ class RewardCalculator:
             return 0.0, RewardComponents()
         
         components = RewardComponents()
+        current_x = current_state.get('mario_x', 0)
+        previous_x = self.previous_state.get('mario_x', 0)
         
-        # 1. Distance-based rewards (Primary - 60%)
-        components.distance_reward = self._calculate_distance_reward(
-            current_state.get('mario_x', 0),
-            self.previous_state.get('mario_x', 0)
-        )
+        # PRIMARY REWARD: New maximum distance (big reward)
+        if current_x > self.max_x_reached:
+            new_distance = current_x - self.max_x_reached
+            components.distance_reward = new_distance * 1.0  # 1 point per pixel of new progress
+            self.max_x_reached = current_x
         
-        # 2. Power-up rewards (Secondary)
-        components.powerup_reward = self._calculate_powerup_reward(
-            self.previous_state.get('power_state', 0),
-            current_state.get('power_state', 0)
-        )
+        # SECONDARY REWARD: Any rightward movement (small reward to encourage exploration)
+        elif current_x > previous_x:
+            rightward_movement = current_x - previous_x
+            components.distance_reward = rightward_movement * 0.1  # 0.1 points per pixel of rightward movement
         
-        # 3. Score and coin rewards (Secondary)
-        score_increase = current_state.get('score', 0) - self.previous_state.get('score', 0)
-        coins_collected = current_state.get('coins', 0) - self.previous_state.get('coins', 0)
-        components.score_reward, components.coin_reward = self._calculate_score_rewards(
-            score_increase, coins_collected
-        )
+        # SMALL PENALTY: Leftward movement (discourage going backward)
+        elif current_x < previous_x:
+            leftward_movement = previous_x - current_x
+            components.movement_penalty = -leftward_movement * 0.05  # Small penalty for going backward
         
-        # 4. Enemy elimination rewards (Secondary)
-        # Note: This would require enemy tracking, for now we estimate from score changes
-        components.enemy_reward = self._estimate_enemy_reward(score_increase)
+        # No reward/penalty for staying in same position (0.0)
         
-        # 5. Movement penalties
-        components.movement_penalty = self._calculate_movement_penalty(
-            current_state.get('mario_x', 0),
-            self.previous_state.get('mario_x', 0)
-        )
+        # Death detection and penalty
+        if current_state.get('lives', 3) < self.previous_state.get('lives', 3):
+            if self.enhanced_features:
+                components.enhanced_death_penalty = self._calculate_enhanced_death_penalty(current_state)
+            else:
+                components.death_penalty = -50.0  # Small penalty, not too harsh
         
-        # 6. Stuck penalty
-        components.stuck_penalty = self._calculate_stuck_penalty(current_state.get('mario_x', 0))
+        # Enhanced reward calculations (only if enhanced features are enabled)
+        if self.enhanced_features and self.config['enhanced']['enabled']:
+            self._calculate_enhanced_rewards(current_state, components)
         
         # Update tracking variables
-        self.max_x_reached = max(self.max_x_reached, current_state.get('mario_x', 0))
-        self._update_stuck_counter(current_state.get('mario_x', 0))
+        self._update_stuck_counter(current_x)
         self.previous_state = current_state.copy()
         
-        # Apply reward shaping
-        total_reward = self._apply_reward_shaping(components.total)
+        # Update enhanced state tracking
+        if self.enhanced_features:
+            self._update_enhanced_state_tracking(current_state)
+        
+        # Total reward includes all components
+        total_reward = components.total
         
         # Track episode rewards
         self.episode_rewards.append(total_reward)
@@ -225,7 +319,7 @@ class RewardCalculator:
     
     def calculate_episode_end_reward(self, episode_data: Dict[str, Any]) -> Tuple[float, RewardComponents]:
         """
-        Calculate end-of-episode rewards and penalties.
+        Calculate end-of-episode rewards based on maximum distance achieved.
         
         Args:
             episode_data: Episode completion data
@@ -235,25 +329,16 @@ class RewardCalculator:
         """
         components = RewardComponents()
         
-        # Level completion reward
-        if episode_data.get('level_completed', False):
-            components.completion_reward = self._calculate_completion_reward(
-                True, episode_data.get('time_remaining', 0)
-            )
-        
-        # Death penalty
-        if episode_data.get('died', False):
-            components.death_penalty = self._calculate_death_penalty(
-                episode_data.get('death_cause', DeathCause.UNKNOWN),
-                episode_data.get('lives_remaining', 0)
-            )
-        
-        # Distance achievement bonus
+        # SIMPLIFIED: Reward is just the maximum distance reached in this episode
         final_distance = episode_data.get('max_x_reached', self.max_x_reached)
-        components.distance_reward = final_distance * 0.5  # Bonus for total distance
+        components.distance_reward = final_distance * 0.1  # 0.1 points per pixel reached
         
-        # Apply reward shaping
-        total_reward = self._apply_reward_shaping(components.total)
+        # Big bonus for level completion
+        if episode_data.get('level_completed', False):
+            components.completion_reward = 1000.0  # Large completion bonus
+        
+        # Simple total reward
+        total_reward = components.distance_reward + components.completion_reward
         
         # Update statistics
         self._update_episode_stats(total_reward)
@@ -491,6 +576,229 @@ class RewardCalculator:
         """Update reward configuration."""
         self._update_config(self.config, new_config)
         self.logger.info("Reward configuration updated")
+    
+    def _calculate_enhanced_rewards(self, current_state: Dict[str, Any], components: RewardComponents):
+        """
+        Calculate enhanced reward components using 20-feature state information.
+        
+        Args:
+            current_state: Current game state with enhanced features
+            components: RewardComponents object to update
+        """
+        # Power-up collection reward
+        components.powerup_collection_reward = self._calculate_powerup_collection_reward(current_state)
+        
+        # Enemy elimination reward
+        components.enemy_elimination_reward = self._calculate_enemy_elimination_reward(current_state)
+        
+        # Environmental navigation reward
+        components.environmental_navigation_reward = self._calculate_environmental_navigation_reward(current_state)
+        
+        # Velocity-based movement reward
+        components.velocity_movement_reward = self._calculate_velocity_movement_reward(current_state)
+        
+        # Strategic positioning reward
+        components.strategic_positioning_reward = self._calculate_strategic_positioning_reward(current_state)
+        
+        # Apply feature weights
+        weights = self.config['enhanced']['feature_weights']
+        components.powerup_collection_reward *= weights.get('powerup_collection', 1.0)
+        components.enemy_elimination_reward *= weights.get('enemy_elimination', 1.0)
+        components.environmental_navigation_reward *= weights.get('environmental_awareness', 1.0)
+        components.velocity_movement_reward *= weights.get('velocity_movement', 1.0)
+        components.strategic_positioning_reward *= weights.get('strategic_positioning', 1.0)
+    
+    def _calculate_powerup_collection_reward(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate reward for power-up collection.
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Power-up collection reward
+        """
+        reward = 0.0
+        
+        # Check for power state increase (power-up collected)
+        current_power = current_state.get('power_state', 0)
+        if current_power > self.previous_power_state:
+            reward = self.config['enhanced']['powerup_collection_reward']
+            self.reward_stats['enhanced_reward_stats']['powerup_collections'] += 1
+            self.logger.debug(f"Power-up collected! Power state: {self.previous_power_state} -> {current_power}")
+        
+        return reward
+    
+    def _calculate_enemy_elimination_reward(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate reward for enemy elimination.
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Enemy elimination reward
+        """
+        reward = 0.0
+        
+        # Check for enemy count decrease (enemy eliminated)
+        current_enemy_count = current_state.get('enemy_count', 0)
+        if current_enemy_count < self.previous_enemy_count:
+            enemies_eliminated = self.previous_enemy_count - current_enemy_count
+            reward = enemies_eliminated * self.config['enhanced']['enemy_elimination_reward']
+            self.reward_stats['enhanced_reward_stats']['enemy_eliminations'] += enemies_eliminated
+            self.logger.debug(f"Enemy eliminated! Count: {self.previous_enemy_count} -> {current_enemy_count}")
+        
+        return reward
+    
+    def _calculate_environmental_navigation_reward(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate reward for environmental navigation (pit avoidance, obstacle navigation).
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Environmental navigation reward
+        """
+        reward = 0.0
+        mario_x_vel = current_state.get('mario_x_vel', 0)
+        
+        # Pit avoidance reward (higher priority)
+        if current_state.get('pit_detected', False):
+            # If pit is detected and Mario is moving forward, reward avoidance
+            if mario_x_vel > 0:  # Moving forward despite pit
+                reward += self.config['enhanced']['pit_avoidance_reward']
+                self.reward_stats['enhanced_reward_stats']['pit_avoidances'] += 1
+                self.logger.debug("Pit avoidance reward applied")
+                return reward  # Return early to avoid double rewards
+        
+        # Obstacle navigation reward (only if no pit detected)
+        solid_tiles_ahead = current_state.get('solid_tiles_ahead', 0)
+        if solid_tiles_ahead > 0:
+            # Reward for navigating through areas with obstacles
+            if mario_x_vel > 0:  # Moving forward through obstacles
+                reward += self.config['enhanced']['obstacle_navigation_reward']
+                self.logger.debug("Obstacle navigation reward applied")
+        
+        return reward
+    
+    def _calculate_velocity_movement_reward(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate reward for velocity-based movement (forward momentum).
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Velocity movement reward
+        """
+        reward = 0.0
+        
+        # Forward momentum reward
+        velocity_magnitude = current_state.get('velocity_magnitude', 0.0)
+        mario_x_vel = current_state.get('mario_x_vel', 0)
+        
+        if mario_x_vel > self.config['enhanced']['forward_momentum_threshold']:
+            # Reward high forward velocity
+            reward = velocity_magnitude * self.config['enhanced']['velocity_movement_multiplier']
+            self.logger.debug(f"Forward momentum reward: {reward:.2f} (velocity: {velocity_magnitude:.2f})")
+        
+        return reward
+    
+    def _calculate_strategic_positioning_reward(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate reward for strategic positioning (maintaining safe distance from enemies).
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Strategic positioning reward
+        """
+        reward = 0.0
+        
+        # Safe distance from enemies reward
+        closest_enemy_distance = current_state.get('closest_enemy_distance', 999.0)
+        safe_distance_threshold = self.config['enhanced']['safe_distance_threshold']
+        
+        if closest_enemy_distance > safe_distance_threshold:
+            # Reward for maintaining safe distance
+            reward = self.config['enhanced']['strategic_positioning_reward']
+            self.last_safe_distance_frames += 1
+            self.reward_stats['enhanced_reward_stats']['safe_positioning_frames'] += 1
+        else:
+            self.last_safe_distance_frames = 0
+        
+        # Bonus for sustained safe positioning
+        if self.last_safe_distance_frames > 60:  # 1 second at 60 FPS
+            reward *= 1.5  # 50% bonus for sustained safe positioning
+        
+        return reward
+    
+    def _calculate_enhanced_death_penalty(self, current_state: Dict[str, Any]) -> float:
+        """
+        Calculate enhanced death penalty based on specific death causes.
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Enhanced death penalty (negative value)
+        """
+        penalty = 0.0
+        
+        # Determine death cause based on enhanced state information
+        if current_state.get('mario_below_viewport', False):
+            # Pit death
+            penalty = self.config['enhanced']['pit_death_penalty']
+            self.logger.debug("Pit death penalty applied")
+        elif current_state.get('closest_enemy_distance', 999.0) < 20.0:
+            # Enemy collision death
+            penalty = self.config['enhanced']['enemy_collision_penalty']
+            self.logger.debug("Enemy collision death penalty applied")
+        elif current_state.get('time_remaining', 400) <= 0:
+            # Time-based death
+            penalty = self.config['enhanced']['time_death_penalty']
+            self.logger.debug("Time death penalty applied")
+        else:
+            # General death penalty
+            penalty = self.config['enhanced']['general_death_penalty']
+            self.logger.debug("General death penalty applied")
+        
+        return penalty
+    
+    def _update_enhanced_state_tracking(self, current_state: Dict[str, Any]):
+        """
+        Update enhanced state tracking variables.
+        
+        Args:
+            current_state: Current game state
+        """
+        self.previous_power_state = current_state.get('power_state', 0)
+        self.previous_enemy_count = current_state.get('enemy_count', 0)
+        self.previous_powerup_present = current_state.get('powerup_present', False)
+    
+    def get_enhanced_reward_stats(self) -> Dict[str, Any]:
+        """
+        Get enhanced reward statistics.
+        
+        Returns:
+            Dictionary containing enhanced reward statistics
+        """
+        if not self.enhanced_features:
+            return {}
+        
+        stats = self.reward_stats['enhanced_reward_stats'].copy()
+        stats.update({
+            'safe_positioning_ratio': (
+                stats['safe_positioning_frames'] / max(1, len(self.episode_rewards))
+            ),
+            'powerup_collection_rate': stats['powerup_collections'] / max(1, self.reward_stats['total_episodes']),
+            'enemy_elimination_rate': stats['enemy_eliminations'] / max(1, self.reward_stats['total_episodes'])
+        })
+        
+        return stats
 
 
 # Utility functions for reward analysis
@@ -527,6 +835,9 @@ def plot_reward_components(reward_components_history: List[RewardComponents],
     """
     try:
         import matplotlib.pyplot as plt
+        enable_plotting = False  # Keep plots off in training runs
+        if not enable_plotting:
+            return
         
         components = ['distance_reward', 'powerup_reward', 'score_reward', 
                      'death_penalty', 'movement_penalty']

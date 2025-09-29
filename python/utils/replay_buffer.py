@@ -21,11 +21,11 @@ import random
 
 # Experience tuple for storing transitions
 Experience = namedtuple('Experience', [
-    'state_frames',      # Current frame stack (8, 84, 84)
+    'state_frames',      # Current frame stack (4, 84, 84)
     'state_vector',      # Current game state vector (12,)
     'action',            # Action taken
     'reward',            # Reward received
-    'next_state_frames', # Next frame stack (8, 84, 84)
+    'next_state_frames', # Next frame stack (4, 84, 84)
     'next_state_vector', # Next game state vector (12,)
     'done',              # Episode termination flag
     'info'               # Additional information (optional)
@@ -43,7 +43,7 @@ class ReplayBuffer:
     def __init__(
         self,
         capacity: int = 100000,
-        frame_stack_size: int = 8,
+        frame_stack_size: int = 4,  # Fixed: changed from 8 to 4 to match model
         frame_size: Tuple[int, int] = (84, 84),
         state_vector_size: int = 12,
         device: str = "cpu",
@@ -57,7 +57,7 @@ class ReplayBuffer:
         
         Args:
             capacity: Maximum number of experiences to store
-            frame_stack_size: Number of frames in each stack (8)
+            frame_stack_size: Number of frames in each stack (4)
             frame_size: Frame dimensions (84, 84)
             state_vector_size: Size of game state vector (12)
             device: Device for tensor operations ("cpu" or "cuda")
@@ -180,6 +180,9 @@ class ReplayBuffer:
         if isinstance(next_state_vector, np.ndarray):
             next_state_vector = torch.from_numpy(next_state_vector).float()
         
+        # Shape validation when storing experiences
+        self._validate_experience_shapes(state_frames, state_vector, next_state_frames, next_state_vector)
+        
         # Store experience
         self.state_frames[self.position] = state_frames.to(self.device)
         self.state_vectors[self.position] = state_vector.to(self.device)
@@ -226,6 +229,14 @@ class ReplayBuffer:
         next_state_frames = self.next_state_frames[indices]
         next_state_vectors = self.next_state_vectors[indices]
         dones = self.dones[indices]
+        
+        # Debug logging for tensor shapes during sampling
+        if hasattr(self, '_debug_sampling') and self._debug_sampling:
+            print(f"DEBUG: Sampled batch shapes:")
+            print(f"  - State frames: {state_frames.shape}")
+            print(f"  - State vectors: {state_vectors.shape}")
+            print(f"  - Next state frames: {next_state_frames.shape}")
+            print(f"  - Next state vectors: {next_state_vectors.shape}")
         
         return (
             state_frames,
@@ -364,6 +375,47 @@ class ReplayBuffer:
             'size': self.size,
             'utilization': self.size / self.capacity
         }
+    
+    def _validate_experience_shapes(self, state_frames, state_vector, next_state_frames, next_state_vector):
+        """
+        Validate shapes of experience tensors before storing.
+        
+        Args:
+            state_frames: Current frame stack tensor
+            state_vector: Current state vector tensor
+            next_state_frames: Next frame stack tensor
+            next_state_vector: Next state vector tensor
+        """
+        # Validate frame stack shapes
+        expected_frame_shape = (self.frame_stack_size, *self.frame_size)
+        
+        if state_frames.shape != expected_frame_shape:
+            print(f"WARNING: State frames shape mismatch!")
+            print(f"  Expected: {expected_frame_shape}")
+            print(f"  Actual: {state_frames.shape}")
+            print(f"  Frame stack size: {self.frame_stack_size}")
+        
+        if next_state_frames.shape != expected_frame_shape:
+            print(f"WARNING: Next state frames shape mismatch!")
+            print(f"  Expected: {expected_frame_shape}")
+            print(f"  Actual: {next_state_frames.shape}")
+        
+        # Validate state vector shapes
+        expected_vector_shape = (self.state_vector_size,)
+        
+        if state_vector.shape != expected_vector_shape:
+            print(f"WARNING: State vector shape mismatch!")
+            print(f"  Expected: {expected_vector_shape}")
+            print(f"  Actual: {state_vector.shape}")
+        
+        if next_state_vector.shape != expected_vector_shape:
+            print(f"WARNING: Next state vector shape mismatch!")
+            print(f"  Expected: {expected_vector_shape}")
+            print(f"  Actual: {next_state_vector.shape}")
+    
+    def enable_debug_sampling(self, enable: bool = True):
+        """Enable or disable debug logging during sampling."""
+        self._debug_sampling = enable
 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
@@ -381,11 +433,11 @@ if __name__ == "__main__":
     
     # Add some dummy experiences
     for i in range(100):
-        state_frames = torch.randn(8, 84, 84)
+        state_frames = torch.randn(4, 84, 84)  # Fixed: changed from 8 to 4
         state_vector = torch.randn(12)
         action = np.random.randint(0, 12)
         reward = np.random.randn()
-        next_state_frames = torch.randn(8, 84, 84)
+        next_state_frames = torch.randn(4, 84, 84)  # Fixed: changed from 8 to 4
         next_state_vector = torch.randn(12)
         done = np.random.random() < 0.1
         
@@ -418,11 +470,11 @@ if __name__ == "__main__":
     
     # Add experiences
     for i in range(100):
-        state_frames = torch.randn(8, 84, 84)
+        state_frames = torch.randn(4, 84, 84)  # Fixed: changed from 8 to 4
         state_vector = torch.randn(12)
         action = np.random.randint(0, 12)
         reward = np.random.randn()
-        next_state_frames = torch.randn(8, 84, 84)
+        next_state_frames = torch.randn(4, 84, 84)  # Fixed: changed from 8 to 4
         next_state_vector = torch.randn(12)
         done = np.random.random() < 0.1
         

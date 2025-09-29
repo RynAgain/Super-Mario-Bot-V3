@@ -135,9 +135,9 @@ class DQNAgent:
     def _initialize_replay_buffer(self):
         """Initialize experience replay buffer."""
         buffer_config = {
-            'capacity': self.config.get('replay_buffer_size', 100000),
+            'capacity': self.config.get('replay_buffer_size', 20000),  # more stable gradients
             'device': str(self.device),
-            'frame_stack_size': 8,
+            'frame_stack_size': 4,  # Fixed: changed from 8 to 4 to match model
             'frame_size': (84, 84),
             'state_vector_size': 12
         }
@@ -185,7 +185,7 @@ class DQNAgent:
         Select action using epsilon-greedy policy.
         
         Args:
-            frames: Stacked frames tensor (1, 8, 84, 84)
+            frames: Stacked frames tensor (1, 4, 84, 84)
             state_vector: Game state vector (1, 12)
             training: Whether in training mode
             
@@ -531,7 +531,7 @@ if __name__ == "__main__":
     agent = DQNAgent(config, device="cpu")  # Use CPU for testing
     
     # Test action selection
-    dummy_frames = torch.randn(1, 8, 84, 84)
+    dummy_frames = torch.randn(1, 4, 84, 84)  # Fixed: changed from 8 to 4
     dummy_state = torch.randn(1, 12)
     
     action = agent.select_action(dummy_frames, dummy_state, training=True)
@@ -545,7 +545,7 @@ if __name__ == "__main__":
     
     # Add more experiences
     for _ in range(100):
-        frames = torch.randn(1, 8, 84, 84)
+        frames = torch.randn(1, 4, 84, 84)  # Fixed: changed from 8 to 4
         state = torch.randn(1, 12)
         action = np.random.randint(0, 12)
         reward = np.random.randn()
