@@ -13,7 +13,7 @@ This project implements a 2-part AI system:
 
 - **Dueling DQN Architecture**: Separate value and advantage streams for better learning
 - **8-Frame Stacking**: Temporal context for understanding movement and animations
-- **Hybrid Communication**: JSON for control messages, binary for high-frequency game data
+- **Hybrid Communication**: JSON for control messages, binary for high-frequency game data.  (might revise this to make the communiction more uniform, also binary is a pain)
 - **Frame Synchronization**: Multi-layer sync strategy prevents desyncs
 - **Comprehensive Reward System**: Level progression primary, survival/scoring secondary
 - **Real-time Monitoring**: CSV logging and performance tracking
