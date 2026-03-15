@@ -63,33 +63,39 @@ local CONFIG = {
 -- ============================================================================
 
 -- Comprehensive memory address mapping for Super Mario Bros
+-- Verified against datacrystal.romhacking.net SMB1 RAM map
 local MEMORY_ADDRESSES = {
-    -- Mario Position and State (Enhanced)
-    MARIO_SCREEN_X = 0x03AD,        -- Mario's screen X position (0-255)
-    MARIO_SCREEN_Y = 0x03B8,        -- Mario's screen Y position
-    MARIO_X_PAGE = 0x006D,          -- Mario's X page (high byte for world position)
-    MARIO_X_SUB = 0x0086,           -- Mario's X sub-position (low byte for world position)
-    MARIO_STATE = 0x000E,           -- Mario's player state (0x0B=dying, 0x06=dead)
-    MARIO_BELOW_VIEWPORT = 0x00B5,  -- Mario below viewport (>1 = in pit)
-    MARIO_POWER = 0x0754,           -- Mario's power state (0=small, 1=big, 2=fire)
-    MARIO_FACING = 0x0045,          -- Mario's facing direction (0=left, 1=right)
-    MARIO_VELOCITY_X = 0x007B,      -- Mario's X velocity
-    MARIO_VELOCITY_Y = 0x007D,      -- Mario's Y velocity
+    -- Mario Position and State
+    MARIO_SCREEN_X = 0x03AD,        -- Mario's X position relative to screen (0-255)
+    MARIO_SCREEN_Y = 0x03B8,        -- Mario's Y position relative to screen
+    MARIO_X_PAGE = 0x006D,          -- Mario's page (screen) number (0-indexed)
+    MARIO_X_SUB = 0x0086,           -- Mario's X pixel position within current page (0-255)
+    MARIO_STATE = 0x000E,           -- Player state (0x06=dead, 0x0B=dying, etc.)
+    MARIO_BELOW_VIEWPORT = 0x00B5,  -- Player Y high pos (>1 = below viewport / in pit)
+    MARIO_POWER = 0x0756,           -- PlayerStatus (0=small, 1=big, 2=fire)  [was 0x0754]
+    MARIO_FACING = 0x0045,          -- Player moving direction (1=right, 2=left)
+    MARIO_VELOCITY_X = 0x0057,      -- Player horizontal speed (signed)  [was 0x007B]
+    MARIO_VELOCITY_Y = 0x009F,      -- Player vertical speed (signed)   [was 0x007D]
     
-    -- Game State (Enhanced)
-    LEVEL_TIME = 0x07F8,            -- Level timer (2 bytes)
-    LEVEL_TIME_HIGH = 0x07F9,       -- Level timer high byte
+    -- Game State
+    LEVEL_TIME_HUNDREDS = 0x07F8,   -- Timer hundreds digit (0-9)
+    LEVEL_TIME_TENS = 0x07F9,       -- Timer tens digit (0-9)
+    LEVEL_TIME_ONES = 0x07FA,       -- Timer ones digit (0-9)
     LIVES = 0x075A,                 -- Number of lives
-    COINS = 0x075E,                 -- Number of coins
-    SCORE_1 = 0x0758,               -- Current score byte 1 (BCD format)
-    SCORE_100 = 0x0759,             -- Current score byte 2 (BCD format)
-    SCORE_10K = 0x075A,             -- Current score byte 3 (BCD format)
-    WORLD = 0x075F,                 -- Current world
-    LEVEL = 0x0760,                 -- Current level
-    GAME_STATE = 0x0770,            -- Game started flag
+    COINS = 0x075E,                 -- Coin tally
+    -- Score: 6 individual decimal digits (0-9 each), Player 1
+    SCORE_100K = 0x07DD,            -- Score hundred-thousands digit  [was 0x0758]
+    SCORE_10K  = 0x07DE,            -- Score ten-thousands digit      [was 0x0759, overlapped LIVES!]
+    SCORE_1K   = 0x07DF,            -- Score thousands digit
+    SCORE_100  = 0x07E0,            -- Score hundreds digit
+    SCORE_10   = 0x07E1,            -- Score tens digit
+    SCORE_1    = 0x07E2,            -- Score ones digit (always 0 in SMB)
+    WORLD = 0x075F,                 -- Current world (0-indexed)
+    LEVEL = 0x0760,                 -- Current area/level (0-indexed)
+    GAME_STATE = 0x0770,            -- Game engine sub-routine state
     END_OF_LEVEL_FLAG = 0x0772,     -- End of level flag
     IS_2PLAYER = 0x077A,            -- 2-player mode flag
-    ONEUP_FLAG = 0x0772,            -- 1-up flag
+    ONEUP_FLAG = 0x075D,            -- Hidden 1-up flag  [was 0x0772, overlapped END_OF_LEVEL_FLAG]
     
     -- Enemy Detection (5 slots) - Enhanced from reference script
     ENEMY_SLOTS = {0x0F, 0x10, 0x11, 0x12, 0x13},     -- Enemy type in each slot
@@ -476,22 +482,25 @@ local function current_level_len(world, level)
     return LEVEL_LEN[key] or 3168
 end
 
--- Enhanced level and world information reading using enhanced addresses
+-- Level and world information reading using verified addresses
 local function read_level_info()
-    -- Use enhanced timer reading (timer is stored as 2-byte word)
-    local timer_word = memory.readbyte(MEMORY_ADDRESSES.LEVEL_TIME) + (memory.readbyte(MEMORY_ADDRESSES.LEVEL_TIME_HIGH) * 256)
+    -- Timer is stored as 3 individual decimal digits (0-9 each), NOT a binary word
+    local timer_hundreds = memory.readbyte(MEMORY_ADDRESSES.LEVEL_TIME_HUNDREDS)
+    local timer_tens = memory.readbyte(MEMORY_ADDRESSES.LEVEL_TIME_TENS)
+    local timer_ones = memory.readbyte(MEMORY_ADDRESSES.LEVEL_TIME_ONES)
+    local time_remaining = (timer_hundreds * 100) + (timer_tens * 10) + timer_ones
     
     return {
-        world_number = memory.readbyte(MEMORY_ADDRESSES.WORLD),          -- Current world
-        level_number = memory.readbyte(MEMORY_ADDRESSES.LEVEL),          -- Current level
+        world_number = memory.readbyte(MEMORY_ADDRESSES.WORLD),          -- Current world (0-indexed)
+        level_number = memory.readbyte(MEMORY_ADDRESSES.LEVEL),          -- Current level (0-indexed)
         
         -- Timer information
-        time_remaining = timer_word,                                     -- Time remaining as word
-        timer_hundreds = math.floor(timer_word / 100),
-        timer_tens = math.floor((timer_word % 100) / 10),
-        timer_ones = timer_word % 10,
+        time_remaining = time_remaining,                                 -- Time remaining (0-999)
+        timer_hundreds = timer_hundreds,
+        timer_tens = timer_tens,
+        timer_ones = timer_ones,
         
-        -- Screen/camera position (keep existing for compatibility)
+        -- Screen/camera position
         screen_x_high = memory.readbyte(MEMORY_ADDRESSES.SCREEN_X_HIGH), -- Camera page
         screen_x_low = memory.readbyte(MEMORY_ADDRESSES.SCREEN_X_LOW),   -- Mario's pixel position
         screen_y = memory.readbyte(MEMORY_ADDRESSES.SCREEN_Y),
@@ -499,25 +508,38 @@ local function read_level_info()
     }
 end
 
--- Enhanced score reading with proper BCD handling using enhanced addresses
+-- Score reading using verified display-digit addresses (0x07DD-0x07E2)
+-- Each byte is a single decimal digit 0-9 (NOT BCD)
 local function read_score_info()
-    -- Score is stored in 3 bytes in BCD format
-    local score1 = memory.readbyte(MEMORY_ADDRESSES.SCORE_1)
-    local score2 = memory.readbyte(MEMORY_ADDRESSES.SCORE_100)
-    local score3 = memory.readbyte(MEMORY_ADDRESSES.SCORE_10K)
+    local s100k = memory.readbyte(MEMORY_ADDRESSES.SCORE_100K)   -- 0x07DD
+    local s10k  = memory.readbyte(MEMORY_ADDRESSES.SCORE_10K)    -- 0x07DE
+    local s1k   = memory.readbyte(MEMORY_ADDRESSES.SCORE_1K)     -- 0x07DF
+    local s100  = memory.readbyte(MEMORY_ADDRESSES.SCORE_100)    -- 0x07E0
+    local s10   = memory.readbyte(MEMORY_ADDRESSES.SCORE_10)     -- 0x07E1
+    local s1    = memory.readbyte(MEMORY_ADDRESSES.SCORE_1)      -- 0x07E2 (always 0 in SMB)
+    
+    -- Clamp digits to 0-9 to avoid garbage values
+    s100k = math.min(9, math.max(0, s100k))
+    s10k  = math.min(9, math.max(0, s10k))
+    s1k   = math.min(9, math.max(0, s1k))
+    s100  = math.min(9, math.max(0, s100))
+    s10   = math.min(9, math.max(0, s10))
+    s1    = math.min(9, math.max(0, s1))
+    
+    local coins_raw = memory.readbyte(MEMORY_ADDRESSES.COINS)
     
     return {
-        -- Individual score bytes (BCD format)
-        score_1 = score1,
-        score_100 = score2,
-        score_10k = score3,
-        score_100k = 0,  -- Placeholder for higher scores
-        score_10 = 0,    -- Placeholder
-        score_1k = 0,    -- Placeholder
+        -- Individual score digits
+        score_100k = s100k,
+        score_10k = s10k,
+        score_1k = s1k,
+        score_100 = s100,
+        score_10 = s10,
+        score_1 = s1,
         
         -- Coins
-        coins_ones = memory.readbyte(MEMORY_ADDRESSES.COINS) % 10,
-        coins_tens = math.floor(memory.readbyte(MEMORY_ADDRESSES.COINS) / 10),
+        coins_ones = coins_raw % 10,
+        coins_tens = math.floor(coins_raw / 10),
         
         -- Additional flags
         oneup_flag = memory.readbyte(MEMORY_ADDRESSES.ONEUP_FLAG)
@@ -1568,6 +1590,33 @@ local function receive_websocket_message(socket)
     if opcode == 0x09 then
         debug_log("Received WebSocket ping frame - sending pong response", "DEBUG")
         
+        -- First, read the ping payload (it may be empty or have data)
+        -- We need to read extended length + mask + payload before responding
+        local ping_payload_data = ""
+        if payload_len > 0 then
+            -- Read mask key if present
+            local ping_mask_key
+            if masked then
+                ping_mask_key = recv_exact(socket, 4)
+                if not ping_mask_key then return nil end
+            end
+            -- Read ping payload
+            local ping_body = recv_exact(socket, payload_len)
+            if ping_body then
+                -- Unmask if needed
+                if masked and ping_mask_key then
+                    local unmasked = {}
+                    for i = 1, #ping_body do
+                        local mk = string.byte(ping_mask_key, ((i - 1) % 4) + 1)
+                        unmasked[i] = string.char(bit_xor(string.byte(ping_body, i), mk))
+                    end
+                    ping_payload_data = table.concat(unmasked)
+                else
+                    ping_payload_data = ping_body
+                end
+            end
+        end
+        
         -- Send pong response (opcode 0x0A) with same payload, properly masked
         local pong_opcode = 0x0A
         local pong_frame = ""
@@ -1576,22 +1625,17 @@ local function receive_websocket_message(socket)
         pong_frame = pong_frame .. pack_u8(bit_or(0x80, pong_opcode))
         
         -- Second byte: MASK (1) + Payload length
-        -- Initialize payload if not set (ping frames may have no payload)
-        if not payload then
-            payload = ""
-        end
-        local payload_len = #payload
-        if payload_len < 126 then
-            pong_frame = pong_frame .. pack_u8(bit_or(0x80, payload_len))
+        local pong_payload_len = #ping_payload_data
+        if pong_payload_len < 126 then
+            pong_frame = pong_frame .. pack_u8(bit_or(0x80, pong_payload_len))
         else
-            -- For simplicity, truncate large ping payloads
-            payload = string.sub(payload, 1, 125)
-            payload_len = 125
-            pong_frame = pong_frame .. pack_u8(bit_or(0x80, payload_len))
+            ping_payload_data = string.sub(ping_payload_data, 1, 125)
+            pong_payload_len = 125
+            pong_frame = pong_frame .. pack_u8(bit_or(0x80, pong_payload_len))
         end
         
         -- Generate 4-byte masking key
-        local mask_key = {
+        local pong_mask_key = {
             math.random(0, 255),
             math.random(0, 255),
             math.random(0, 255),
@@ -1600,18 +1644,18 @@ local function receive_websocket_message(socket)
         
         -- Add masking key to frame
         for i = 1, 4 do
-            pong_frame = pong_frame .. pack_u8(mask_key[i])
+            pong_frame = pong_frame .. pack_u8(pong_mask_key[i])
         end
         
         -- Mask the payload
-        local masked_payload = ""
-        for i = 1, payload_len do
-            local data_byte = string.byte(payload, i)
-            local mask_byte = mask_key[((i - 1) % 4) + 1]
-            masked_payload = masked_payload .. pack_u8(bit_xor(data_byte, mask_byte))
+        local masked_pong = ""
+        for i = 1, pong_payload_len do
+            local data_byte = string.byte(ping_payload_data, i)
+            local mask_byte = pong_mask_key[((i - 1) % 4) + 1]
+            masked_pong = masked_pong .. pack_u8(bit_xor(data_byte, mask_byte))
         end
         
-        pong_frame = pong_frame .. masked_payload
+        pong_frame = pong_frame .. masked_pong
         
         -- Send pong response
         local success, err = socket:send(pong_frame)

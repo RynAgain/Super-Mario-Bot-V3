@@ -245,6 +245,10 @@ class RewardCalculator:
         self.episode_start_time = initial_state.get('timestamp', 0)
         self.episode_rewards.clear()
         
+        # Reset terminal state cache
+        self._cached_terminal = None
+        self._cached_terminal_reason = ""
+        
         # Reset enhanced state tracking
         if self.enhanced_features:
             self.previous_power_state = initial_state.get('power_state', 0)
@@ -257,6 +261,10 @@ class RewardCalculator:
     def calculate_frame_reward(self, current_state: Dict[str, Any]) -> Tuple[float, RewardComponents]:
         """
         Calculate reward for current frame with enhanced features support.
+        
+        IMPORTANT: This method updates self.previous_state at the end.
+        Call detect_terminal_state() BEFORE calling this method if you need
+        to compare current vs previous lives, or use the cached result.
         
         Args:
             current_state: Current game state
@@ -290,12 +298,16 @@ class RewardCalculator:
         
         # No reward/penalty for staying in same position (0.0)
         
-        # Death detection and penalty
+        # Death detection and penalty (compare current with PREVIOUS state before we overwrite it)
         if current_state.get('lives', 3) < self.previous_state.get('lives', 3):
             if self.enhanced_features:
                 components.enhanced_death_penalty = self._calculate_enhanced_death_penalty(current_state)
             else:
                 components.death_penalty = -50.0  # Small penalty, not too harsh
+        
+        # Cache terminal detection result BEFORE updating previous_state
+        # so that detect_terminal_state() still sees the real previous state
+        self._cached_terminal, self._cached_terminal_reason = self._detect_terminal_impl(current_state)
         
         # Enhanced reward calculations (only if enhanced features are enabled)
         if self.enhanced_features and self.config['enhanced']['enabled']:
@@ -540,9 +552,11 @@ class RewardCalculator:
             'learning_progress': float(np.mean(rewards[-10:]) - np.mean(rewards[:10]))
         }
     
-    def detect_terminal_state(self, current_state: Dict[str, Any]) -> Tuple[bool, str]:
+    def _detect_terminal_impl(self, current_state: Dict[str, Any]) -> Tuple[bool, str]:
         """
-        Detect if current state is terminal (episode should end).
+        Internal terminal state detection using self.previous_state.
+        
+        Must be called BEFORE self.previous_state is overwritten.
         
         Args:
             current_state: Current game state
@@ -550,7 +564,10 @@ class RewardCalculator:
         Returns:
             Tuple of (is_terminal, reason)
         """
-        # Death detection
+        if self.previous_state is None:
+            return False, ""
+        
+        # Death detection (compare with previous_state which hasn't been overwritten yet)
         if current_state.get('lives', 3) < self.previous_state.get('lives', 3):
             return True, "death"
         
@@ -559,7 +576,8 @@ class RewardCalculator:
             return True, "level_complete"
         
         # Timeout detection
-        if current_state.get('time_remaining', 400) <= 0:
+        time_remaining = current_state.get('time_remaining', current_state.get('time', 400))
+        if time_remaining <= 0:
             return True, "timeout"
         
         # Stuck for too long (optional termination)
@@ -567,6 +585,31 @@ class RewardCalculator:
             return True, "stuck_timeout"
         
         return False, ""
+    
+    def detect_terminal_state(self, current_state: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Detect if current state is terminal (episode should end).
+        
+        If calculate_frame_reward() was already called for this frame,
+        returns the cached result (which was computed before previous_state
+        was overwritten).  Otherwise computes it live.
+        
+        Args:
+            current_state: Current game state
+            
+        Returns:
+            Tuple of (is_terminal, reason)
+        """
+        # Use cached result from calculate_frame_reward if available
+        if hasattr(self, '_cached_terminal') and self._cached_terminal is not None:
+            result = (self._cached_terminal, self._cached_terminal_reason)
+            # Clear cache after consumption
+            self._cached_terminal = None
+            self._cached_terminal_reason = ""
+            return result
+        
+        # Fallback: compute directly (may give wrong result if previous_state was already updated)
+        return self._detect_terminal_impl(current_state)
     
     def get_config(self) -> Dict[str, Any]:
         """Get current reward configuration."""

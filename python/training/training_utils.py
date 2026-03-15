@@ -17,7 +17,14 @@ from typing import Dict, Any, Optional, List, Tuple, Union
 from dataclasses import dataclass, asdict
 from collections import deque
 import numpy as np
-import GPUtil
+
+# Optional GPU monitoring
+try:
+    import GPUtil
+    _GPUTIL_AVAILABLE = True
+except ImportError:
+    GPUtil = None
+    _GPUTIL_AVAILABLE = False
 
 
 @dataclass
@@ -549,7 +556,12 @@ class SystemHealthMonitor:
         }
         
         self.process = psutil.Process()
-        self.gpu_available = len(GPUtil.getGPUs()) > 0
+        self.gpu_available = False
+        if _GPUTIL_AVAILABLE:
+            try:
+                self.gpu_available = len(GPUtil.getGPUs()) > 0
+            except Exception:
+                self.gpu_available = False
         
         # Health history
         self.health_history = deque(maxlen=100)

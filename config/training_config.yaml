@@ -5,20 +5,24 @@ training:
   # Core Learning Parameters
   learning_rate: 0.00025          # Adam optimizer learning rate
   batch_size: 32                  # Training batch size
-  replay_buffer_size: 10000       # Experience replay buffer capacity (reduced for 8GB GPU)
+  replay_buffer_size: 20000       # Experience replay buffer capacity
   target_update_frequency: 1000   # Target network update interval (steps)
+  tau: 0.005                      # Soft target update rate (Polyak averaging)
   
   # Exploration Strategy (Epsilon-Greedy)
   epsilon_start: 1.0              # Initial exploration rate
   epsilon_end: 0.01               # Final exploration rate
-  epsilon_decay: 0.9995           # Decay rate per step (slower exploration decay)
+  epsilon_decay: 0.998            # Decay rate PER EPISODE (not per step)
   epsilon_decay_type: "exponential" # "exponential" or "linear"
+  
+  # Frame Skipping
+  frame_skip: 4                   # Act every N frames (repeat action for N frames)
   
   # Training Schedule
   max_episodes: 50000             # Maximum training episodes
-  max_steps_per_episode: 18000    # Max steps per episode (5 min at 60 FPS)
-  warmup_episodes: 1000           # Episodes before training starts
-  save_frequency: 1000            # Model checkpoint save interval
+  max_steps_per_episode: 4500     # Max steps per episode (18000 frames / 4 frame_skip)
+  warmup_episodes: 50             # Episodes before training starts (was 1000 -- way too long)
+  save_frequency: 500             # Model checkpoint save interval
   evaluation_frequency: 500       # Evaluation run interval
   
   # Visualization Settings
@@ -74,6 +78,11 @@ checkpointing:
   keep_best_n: 5                 # Keep N best performing checkpoints
   save_optimizer_state: true     # Save optimizer state in checkpoints
   compression: true               # Compress checkpoint files
+
+# WebSocket Communication
+websocket:
+  host: "localhost"                # WebSocket server bind address
+  port: 8765                      # WebSocket server port
 
 # Network Configuration (referenced by validation)
 network:

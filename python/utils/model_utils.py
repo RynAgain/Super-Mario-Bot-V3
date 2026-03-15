@@ -512,7 +512,7 @@ class WeightInitializer:
     
     @classmethod
     def initialize_model(
-        self,
+        cls,
         model: nn.Module,
         method: str = "kaiming_normal",
         **kwargs
@@ -526,11 +526,11 @@ class WeightInitializer:
             **kwargs: Additional arguments for initialization method
         """
         if method == "kaiming_normal":
-            model.apply(lambda m: self.kaiming_normal_init(m, **kwargs))
+            model.apply(lambda m: cls.kaiming_normal_init(m, **kwargs))
         elif method == "xavier_uniform":
-            model.apply(self.xavier_uniform_init)
+            model.apply(cls.xavier_uniform_init)
         elif method == "orthogonal":
-            model.apply(lambda m: self.orthogonal_init(m, **kwargs))
+            model.apply(lambda m: cls.orthogonal_init(m, **kwargs))
         else:
             raise ValueError(f"Unknown initialization method: {method}")
 

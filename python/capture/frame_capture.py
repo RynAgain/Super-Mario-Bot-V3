@@ -476,105 +476,91 @@ class FrameCapture:
     
     def parse_game_state(self, game_state_data: bytes) -> Dict[str, Any]:
         """
-        Parse binary game state data from Lua script with robust error handling.
+        Parse binary game state payload from Lua script.
+        
+        IMPORTANT: The WebSocket server already strips the 8-byte header before
+        calling the binary handler.  This method receives the RAW PAYLOAD only
+        (expected to be exactly 128 bytes).  Do NOT try to parse a header here.
+        
+        Binary payload layout (128 bytes total):
+          Bytes  0-15  : Mario Data Block  (16 bytes)
+          Bytes 16-47  : Enemy Data Block   (32 bytes)
+          Bytes 48-111 : Level Data Block   (64 bytes)
+          Bytes 112-127: Game Variables     (16 bytes)
         
         Args:
-            game_state_data: Binary game state data from WebSocket
+            game_state_data: 128-byte binary payload (header already stripped)
             
         Returns:
             Parsed game state dictionary
         """
         import struct
         
-        # Define struct formats
-        HEADER_FMT = struct.Struct('<BIHB')        # 8 bytes
-        MARIO_FMT  = struct.Struct('<HHbbBBBBBBBB')  # 16 bytes
+        MARIO_FMT  = struct.Struct('<HHbbBBBBBBBB')  # 16 bytes (includes 2 reserved)
         ENEMY_COUNT = 8
         ENEMY_BYTES_PER = 4
         ENEMY_TOTAL = ENEMY_COUNT * ENEMY_BYTES_PER  # 32 bytes
         LEVEL_BLOCK_SIZE = 64
         GAMEVARS_BLOCK_SIZE = 16
-        EXPECTED_TOTAL = HEADER_FMT.size + MARIO_FMT.size + ENEMY_TOTAL + LEVEL_BLOCK_SIZE + GAMEVARS_BLOCK_SIZE  # 136
+        EXPECTED_PAYLOAD = 128
         
         def _hexdump(data: bytes, limit: int = 64) -> str:
             return ' '.join(f'{b:02x}' for b in data[:limit])
         
         try:
             total_len = len(game_state_data)
-            self.logger.debug(f"[GS] total={total_len} (expected {EXPECTED_TOTAL}). Hex head: {_hexdump(game_state_data, 32)}")
+            self.logger.debug(f"[GS] payload={total_len} (expected {EXPECTED_PAYLOAD}). Hex head: {_hexdump(game_state_data, 32)}")
 
-            if total_len < HEADER_FMT.size + MARIO_FMT.size:
-                self.logger.warning(f"[GS] Too short for header+Mario: {total_len} bytes")
+            if total_len < MARIO_FMT.size:
+                self.logger.warning(f"[GS] Payload too short for Mario block: {total_len} bytes")
                 return self._get_default_game_state()
 
-            # ----- Header -----
-            header = game_state_data[0:HEADER_FMT.size]
-            try:
-                message_type, frame_id, data_length, checksum = HEADER_FMT.unpack(header)
-            except struct.error as e:
-                self.logger.warning(f"[GS] Header unpack failed: {e}")
-                return self._get_default_game_state()
-
-            # Use actual payload length instead of trusting header data_length
-            payload_len = total_len - HEADER_FMT.size
-            if data_length != payload_len:
-                self.logger.debug(f"[GS] Header data_length={data_length} vs actual payload={payload_len} - using actual")
-
-            # ----- Mario (16B) -----
-            off = HEADER_FMT.size
+            # ----- Mario (16B) at offset 0 -----
+            off = 0
             mario_end = off + MARIO_FMT.size
-            if total_len < mario_end:
-                self.logger.warning(f"[GS] Missing Mario block: need {MARIO_FMT.size}, have {total_len - off}")
-                return self._get_default_game_state()
-
             try:
                 mario_values = MARIO_FMT.unpack(game_state_data[off:mario_end])
             except struct.error as e:
                 self.logger.error(f"[GS] Mario unpack failed: {e}")
                 return self._get_default_game_state()
-
             off = mario_end
 
-            # ----- Enemy (32B) -----
+            # ----- Enemy (32B) at offset 16 -----
             enemy_end = off + ENEMY_TOTAL
-            enemies_raw = b''
             if total_len >= enemy_end:
-                enemies_raw = game_state_data[off:enemy_end]
                 off = enemy_end
             else:
-                # Partial or missing enemy data; skip but note it
-                missing = enemy_end - total_len
-                self.logger.debug(f"[GS] Enemy data short by {missing} bytes; proceeding with zeros")
-                # we won't use enemies in state_vector here; fine to proceed
+                self.logger.debug(f"[GS] Enemy data short; proceeding with zeros")
+                off = total_len  # skip what we can
 
-            # ----- Tail (level + game vars) -----
+            # ----- Level Data (64B) at offset 48 -----
             tail_len = total_len - off
-            # We *intend* 64 + 16 = 80 bytes, but we may have fewer (your current 70)
             level_available = min(tail_len, LEVEL_BLOCK_SIZE)
-            gv_available = max(0, tail_len - LEVEL_BLOCK_SIZE)
-            gv_available = min(gv_available, GAMEVARS_BLOCK_SIZE)
-
             level_block = game_state_data[off: off + level_available]
             off += level_available
+
+            # ----- Game Variables (16B) at offset 112 -----
+            gv_available = min(total_len - off, GAMEVARS_BLOCK_SIZE)
             gamevars_block = game_state_data[off: off + gv_available]
-            off += gv_available
 
             self.logger.debug(
-                f"[GS] Segments: header=8, mario=16, enemy=({len(enemies_raw)}) "
+                f"[GS] Segments: mario=16, enemy=32, "
                 f"level=({len(level_block)}/{LEVEL_BLOCK_SIZE}), gamevars=({len(gamevars_block)}/{GAMEVARS_BLOCK_SIZE})"
             )
 
             # ---- Interpret Mario values ----
             # <HHbbBBBBBBBB
-            # x_pos_world, y_pos_level, x_vel(int8), y_vel(int8),
-            # power, anim, dir, state, lives, invinc, rsv1, rsv2
-            mx, my = mario_values[0], mario_values[1]
-            mstate = mario_values[7]
-            mlives = mario_values[8]
-            mpower = mario_values[4]
+            # x_pos_world(u16), y_pos_level(u16), x_vel(i8), y_vel(i8),
+            # power(u8), anim(u8), dir(u8), player_state(u8), lives(u8), invinc(u8), rsv1, rsv2
+            mx       = mario_values[0]
+            my       = mario_values[1]
+            mx_vel   = mario_values[2]
+            my_vel   = mario_values[3]
+            mpower   = mario_values[4]
+            mstate   = mario_values[7]
+            mlives   = mario_values[8]
 
-            # ---- Interpret Level block (if present) ----
-            # camera_x(2) + world(1) + level(1) + score_digits(4B) + time(4) + coins(2) = 14B minimal
+            # ---- Interpret Level block ----
             world = 1
             level = 1
             score = 0
@@ -583,8 +569,6 @@ class FrameCapture:
 
             if len(level_block) >= 14:
                 try:
-                    # camera_x(2) + world(1) + level(1) + score digits (4B) + time(4B) + coins(2B)
-                    # Use staged reads to avoid struct issues
                     camera_x = struct.unpack_from('<H', level_block, 0)[0]
                     world     = level_block[2]
                     level     = level_block[3]
@@ -598,18 +582,13 @@ class FrameCapture:
                 except Exception as e:
                     self.logger.warning(f"[GS] Level parse failed ({len(level_block)}B): {e}; using defaults")
 
-            # ---- Optional: checksum verify ----
-            # Sum checksum to match Lua script: sum(payload) % 256
-            calc_checksum = (sum(game_state_data[HEADER_FMT.size:]) % 256) if payload_len > 0 else 0
-            if calc_checksum != checksum:
-                self.logger.debug(f"[GS] Checksum mismatch: header={checksum} calc={calc_checksum}")
-
-            # Debug: Log parsed Mario position values
             self.logger.debug(f"PARSED: mario_x={int(mx)}, mario_y={int(my)}, lives={int(mlives)}, score={int(score)}")
             
             return {
                 'mario_x': int(mx),
                 'mario_y': int(my),
+                'mario_x_vel': int(mx_vel),
+                'mario_y_vel': int(my_vel),
                 'mario_state': int(mstate),
                 'world': int(world),
                 'level': int(level),
@@ -618,15 +597,14 @@ class FrameCapture:
                 'coins': int(coins),
                 'time': int(time_rem),
                 'powerup': int(mpower),
+                'power_state': int(mpower),
                 'timestamp': time.time(),
-                # Optional debug fields:
-                '_raw_total_len': total_len,
-                '_payload_len': payload_len,
+                '_payload_len': total_len,
             }
 
         except Exception as e:
             self.logger.error(f"[GS] Fatal parse error: {e}")
-            self.logger.error(f"[GS] Total len: {len(game_state_data)}; Hex head: {_hexdump(game_state_data, 32)}")
+            self.logger.error(f"[GS] Payload len: {len(game_state_data)}; Hex head: {_hexdump(game_state_data, 32)}")
             return self._get_default_game_state()
     
     def _get_default_game_state(self) -> Dict[str, Any]:

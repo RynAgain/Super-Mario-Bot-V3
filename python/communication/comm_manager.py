@@ -36,63 +36,78 @@ class GameState:
         self._parse_binary_data(raw_data)
     
     def _parse_binary_data(self, data: bytes):
-        """Parse binary payload (must be exactly 128 bytes)."""
+        """Parse binary payload (must be exactly 128 bytes).
+        
+        Layout matches what the Lua script packs in pack_binary_game_state():
+          Mario Data Block  (16 bytes): bytes 0-15
+          Enemy Data Block  (32 bytes): bytes 16-47
+          Level Data Block  (64 bytes): bytes 48-111
+          Game Variables    (16 bytes): bytes 112-127
+        """
         if len(data) != 128:
-            # Drop frame but don't explode
             raise ValueError(f"Expected 128-byte payload, got {len(data)}")
         
         # Parse Mario Data Block (16 bytes)
-        mario_data = struct.unpack('<HHhhBBBBBBH', data[0:16])
-        self.mario_x = mario_data[0]          # X Position (world coordinates)
-        self.mario_y = mario_data[1]          # Y Position (world coordinates)
-        self.mario_x_vel = mario_data[2]      # X Velocity (signed)
-        self.mario_y_vel = mario_data[3]      # Y Velocity (signed)
+        # Lua packs: u16 x, u16 y, i8 xvel, i8 yvel, u8 power, u8 anim,
+        #            u8 dir, u8 player_state, u8 lives, u8 invincibility,
+        #            u8 x_pos_raw, u8 crouching, u8 rsv1, u8 rsv2
+        mario_data = struct.unpack('<HHbbBBBBBBBBBB', data[0:16])
+        self.mario_x = mario_data[0]          # X Position (world coordinates, u16)
+        self.mario_y = mario_data[1]          # Y Position (u16)
+        self.mario_x_vel = mario_data[2]      # X Velocity (signed i8)
+        self.mario_y_vel = mario_data[3]      # Y Velocity (signed i8)
         self.power_state = mario_data[4]      # Power State (0=small, 1=big, 2=fire)
         self.animation_state = mario_data[5]  # Animation State
         self.direction = mario_data[6]        # Direction Facing (0=left, 1=right)
-        self.on_ground = mario_data[7]        # On Ground Flag
+        self.on_ground = mario_data[7]        # Player state byte (used as on_ground proxy)
         self.lives = mario_data[8]            # Lives Remaining
         self.invincibility = mario_data[9]    # Invincibility Timer
-        # mario_data[10] is reserved
+        # mario_data[10] = x_pos_raw, mario_data[11] = crouching, 12-13 reserved
         
-        # Parse Enemy Data Block (32 bytes, up to 8 enemies)
+        # Parse Enemy Data Block (32 bytes, up to 8 enemies, 4 bytes each)
         self.enemies = []
         for i in range(8):
             offset = 16 + (i * 4)
-            if offset + 4 <= len(data):
-                enemy_data = struct.unpack('<BBBB', data[offset:offset+4])
-                enemy_type, enemy_x, enemy_y, enemy_state = enemy_data
-                
-                if enemy_type > 0:  # 0 = no enemy
-                    self.enemies.append({
-                        'type': enemy_type,
-                        'x': enemy_x,
-                        'y': enemy_y,
-                        'state': enemy_state
-                    })
+            enemy_data = struct.unpack('<BBBB', data[offset:offset+4])
+            enemy_type, enemy_x, enemy_y, enemy_state = enemy_data
+            
+            if enemy_type > 0:
+                self.enemies.append({
+                    'type': enemy_type,
+                    'x': enemy_x,
+                    'y': enemy_y,
+                    'state': enemy_state
+                })
         
-        # Parse Level Data Block (64 bytes)
+        # Parse Level Data Block (64 bytes at offset 48)
+        # Lua packs: u16 camera_x, u8 world, u8 level,
+        #            u8 s100k, u8 s10k, u8 s1k, u8 s100,
+        #            u32 time_remaining, u16 total_coins, ...
         level_offset = 48
-        level_data = struct.unpack('<HBBIHH', data[level_offset:level_offset+12])
-        self.camera_x = level_data[0]         # Camera X Position
-        self.world_number = level_data[1]     # World Number
-        self.level_number = level_data[2]     # Level Number
-        self.score = level_data[3]            # Score (BCD encoded)
-        self.time_remaining = level_data[4]   # Time Remaining
-        self.coins = level_data[5]            # Coins Collected
+        camera_x = struct.unpack_from('<H', data, level_offset)[0]
+        self.camera_x = camera_x
+        self.world_number = data[level_offset + 2]
+        self.level_number = data[level_offset + 3]
+        s100k = data[level_offset + 4]
+        s10k  = data[level_offset + 5]
+        s1k   = data[level_offset + 6]
+        s100  = data[level_offset + 7]
+        self.score = (s100k * 100000) + (s10k * 10000) + (s1k * 1000) + (s100 * 100)
+        self.time_remaining = struct.unpack_from('<I', data, level_offset + 8)[0]
+        self.coins = struct.unpack_from('<H', data, level_offset + 12)[0]
         
-        # Level layout data (52 bytes of compressed tile data)
-        self.level_layout = data[level_offset+12:level_offset+64]
+        # Remaining 50 bytes of level block are enhanced features (power-up, threats, tiles, etc.)
+        self.level_layout = data[level_offset + 14:level_offset + 64]
         
-        # Parse Game Variables Block (16 bytes)
+        # Parse Game Variables Block (16 bytes at offset 112)
+        # Lua packs: u8 game_engine_state, u8 level_progress_pct,
+        #            u16 distance_to_flag, u32 frame_id, u32 timestamp, 4 bytes reserved
         game_vars_offset = 112
-        game_vars = struct.unpack('<BBHIII', data[game_vars_offset:game_vars_offset+16])
-        self.game_state = game_vars[0]        # Game State (0=playing, 1=paused, 2=game_over)
-        self.level_progress = game_vars[1]    # Level Progress Percentage
-        self.distance_to_flag = game_vars[2]  # Distance to Flag
-        self.frame_counter = game_vars[3]     # Frame Counter
-        self.episode_timer = game_vars[4]     # Episode Timer
-        # game_vars[5] is reserved
+        self.game_state = data[game_vars_offset]
+        self.level_progress = data[game_vars_offset + 1]
+        self.distance_to_flag = struct.unpack_from('<H', data, game_vars_offset + 2)[0]
+        self.frame_counter = struct.unpack_from('<I', data, game_vars_offset + 4)[0]
+        self.episode_timer = struct.unpack_from('<I', data, game_vars_offset + 8)[0]
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert game state to dictionary."""

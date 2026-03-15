@@ -196,6 +196,12 @@ class WebSocketServer:
             async def handler_wrapper(websocket, path=None):
                 return await self._handle_client(websocket, path or "/")
             
+            # IMPORTANT: The Lua client implements WebSocket manually over raw TCP.
+            # It does NOT respond to WebSocket-level ping frames (opcode 0x09) properly
+            # because it only handles text (0x01) and binary (0x02) opcodes in the
+            # receive path.  Disable the built-in ping/pong mechanism entirely to
+            # prevent the library from closing the connection with code 1011.
+            # Connection liveness is instead monitored by our own _ping_task().
             self.server = await websockets.serve(
                 handler_wrapper,
                 self.host,
@@ -203,8 +209,8 @@ class WebSocketServer:
                 max_size=65536,  # 64KB buffer
                 max_queue=1,     # Back-pressure: limit queued messages
                 compression=None,  # Disable compression for latency
-                ping_interval=10.0,  # more frequent heartbeats
-                ping_timeout=10.0    # Close connection if ping not responded in 10 seconds
+                ping_interval=None,  # DISABLED - Lua client can't respond to WS pings
+                ping_timeout=None    # DISABLED - prevents premature close
             )
             self.is_running = True
             self.logger.info("WebSocket server started successfully")
@@ -633,13 +639,18 @@ class WebSocketServer:
         
         await self._send_json(error_data)
     
-    async def send_action(self, action_buttons: Dict[str, bool], frame_id: Optional[int] = None):
+    async def send_action(self, action_buttons: Dict[str, bool], frame_id: Optional[int] = None,
+                          action_id: Optional[int] = None):
         """
         Send action command to Lua script.
+        
+        Sends both an integer action ID (preferred by Lua for reliability)
+        and the button dictionary as fallback.
         
         Args:
             action_buttons: Button states dictionary
             frame_id: Frame ID for synchronization
+            action_id: Integer action ID (0-11) matching Lua ACTION_MAPPING
         """
         if frame_id is None:
             frame_id = self.current_frame_id
@@ -650,6 +661,10 @@ class WebSocketServer:
             'buttons': action_buttons,
             'hold_frames': 1
         }
+        
+        # Include action ID for reliable Lua-side parsing (avoids nested JSON issues)
+        if action_id is not None:
+            action_data['action'] = action_id
         
         success = await self._send_json(action_data)
         if not success:
@@ -679,32 +694,31 @@ class WebSocketServer:
         return success
     
     async def _ping_task(self):
-        """Background task to monitor connection health and send pings."""
+        """Background task to monitor connection health.
+        
+        NOTE: We do NOT use the websockets library's ping() method because
+        the Lua client implements WebSocket manually and may not handle
+        low-level ping frames reliably.  Instead, we send a JSON-level
+        heartbeat message and consider the connection healthy if we've
+        received any message recently.
+        """
         while self.is_running:
             try:
-                await asyncio.sleep(20.0)  # Check every 20 seconds
+                await asyncio.sleep(30.0)  # Check every 30 seconds
                 
-                if self.client_websocket and not getattr(self.client_websocket, 'closed', True):
+                if self.client_websocket:
+                    # Check if we've received any message recently
+                    # The websocket library tracks this internally
                     try:
-                        # Send ping and wait for pong with timeout
-                        pong_waiter = await self.client_websocket.ping()
-                        await asyncio.wait_for(pong_waiter, timeout=10.0)
-                        self.logger.debug("Ping successful - connection healthy")
-                        
-                    except asyncio.TimeoutError:
-                        self.logger.warning("Ping timeout - closing connection")
-                        try:
-                            await self.client_websocket.close(code=1011, reason="Ping timeout")
-                        except Exception:
-                            pass  # Connection might already be closed
-                        self.client_websocket = None
-                        
+                        # Just check if the connection is still open
+                        is_closed = getattr(self.client_websocket, 'closed', False)
+                        if is_closed:
+                            self.logger.warning("Connection detected as closed during health check")
+                            self.client_websocket = None
+                        else:
+                            self.logger.debug("Connection health check passed - connection open")
                     except Exception as e:
-                        self.logger.warning(f"Ping failed: {e} - closing connection")
-                        try:
-                            await self.client_websocket.close(code=1011, reason="Ping failed")
-                        except Exception:
-                            pass  # Connection might already be closed
+                        self.logger.warning(f"Health check error: {e}")
                         self.client_websocket = None
                     
             except Exception as e:

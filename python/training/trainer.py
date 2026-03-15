@@ -54,8 +54,10 @@ class TrainingConfig:
     evaluation_frequency: int
     target_fps: float
     frame_stack_size: int
+    frame_skip: int
     enable_curriculum: bool
     enable_plotting: bool
+    reward_clip: float  # Clip rewards to [-reward_clip, +reward_clip]
 
 
 class MarioTrainer:
@@ -111,19 +113,26 @@ class MarioTrainer:
     def _initialize_subsystems(self):
         """Initialize all training subsystems."""
         try:
-            # Training configuration with explicit light-load defaults
+            # Training configuration
             training_config = self.config.get('training', {})
             self.training_config = TrainingConfig(
                 max_episodes=training_config.get('max_episodes', 50000),
-                max_steps_per_episode=training_config.get('max_steps_per_episode', 18000),
-                warmup_episodes=training_config.get('warmup_episodes', 1000),
-                save_frequency=training_config.get('save_frequency', 1000),
+                max_steps_per_episode=training_config.get('max_steps_per_episode', 4500),
+                warmup_episodes=training_config.get('warmup_episodes', 50),
+                save_frequency=training_config.get('save_frequency', 500),
                 evaluation_frequency=training_config.get('evaluation_frequency', 500),
-                target_fps=30,  # Light-load default: reduced from 60 to 30 FPS
-                frame_stack_size=4,  # Light-load default: reduced from 8 to 4 frames
+                target_fps=30,
+                frame_stack_size=4,
+                frame_skip=training_config.get('frame_skip', 4),
                 enable_curriculum=training_config.get('curriculum', {}).get('enabled', True),
-                enable_plotting=False  # Light-load default: disabled to prevent freezing
+                enable_plotting=False,
+                reward_clip=1.0  # Clip rewards to [-1, +1] for Q-value stability
             )
+            
+            # Frame skip counter (acts every N frames, repeats last action for skipped frames)
+            self._frame_skip_counter = 0
+            self._last_action_id = 0
+            self._last_action_buttons = {}
             
             # Initialize CSV logger
             self.csv_logger = CSVLogger(
@@ -521,12 +530,31 @@ class MarioTrainer:
             # Process frame in episode manager
             frame_reward, reward_components, is_terminal = self.episode_manager.process_frame(
                 game_state,
-                sync_quality=1.0  # Simplified sync quality
+                sync_quality=1.0
             )
+            
+            # REWARD CLIPPING: clip to [-clip, +clip] for Q-value stability
+            clip_val = self.training_config.reward_clip
+            frame_reward = max(-clip_val, min(clip_val, frame_reward))
             
             # Log terminal state detection
             if is_terminal:
                 self.logger.info(f"Terminal state detected in episode manager: {self.episode_manager.current_episode.termination_reason if self.episode_manager.current_episode else 'unknown'}")
+            
+            # FRAME SKIPPING: only select a new action every N frames
+            # On skipped frames, repeat the previous action and accumulate reward
+            self._frame_skip_counter += 1
+            select_new_action = (self._frame_skip_counter >= self.training_config.frame_skip) or is_terminal
+            
+            if not select_new_action and hasattr(self, '_last_action_id'):
+                # Repeat previous action on skipped frames
+                action_sent = await self.websocket_server.send_action(
+                    self._last_action_buttons, frame_id, action_id=self._last_action_id
+                )
+                return  # Skip network forward pass on skipped frames
+            
+            # Reset frame skip counter
+            self._frame_skip_counter = 0
             
             # Get preprocessed frames and state vector
             frames, state_vector = self.frame_capture.process_frame(game_state)
@@ -539,21 +567,18 @@ class MarioTrainer:
             
             # Ensure frames have batch dimension: (1, height, width, channels)
             if len(frames.shape) == 3:
-                frames = frames.unsqueeze(0)  # Add batch dimension
+                frames = frames.unsqueeze(0)
             elif len(frames.shape) == 4 and frames.shape[0] != 1:
-                # If batch size is not 1, take first sample
                 frames = frames[:1]
             
             # Convert from channels-last to channels-first format for PyTorch
-            # From (batch, height, width, channels) to (batch, channels, height, width)
             if len(frames.shape) == 4:
-                frames = frames.permute(0, 3, 1, 2)  # Transpose dimensions
+                frames = frames.permute(0, 3, 1, 2)
             
             # Ensure state vector has batch dimension: (1, features)
             if len(state_vector.shape) == 1:
-                state_vector = state_vector.unsqueeze(0)  # Add batch dimension
+                state_vector = state_vector.unsqueeze(0)
             elif len(state_vector.shape) == 2 and state_vector.shape[0] != 1:
-                # If batch size is not 1, take first sample
                 state_vector = state_vector[:1]
             
             # Move to device
@@ -569,8 +594,12 @@ class MarioTrainer:
             # Convert action ID to button mapping
             action_buttons = self._action_id_to_buttons(action_id)
             
-            # Send action to Lua script
-            action_sent = await self.websocket_server.send_action(action_buttons, frame_id)
+            # Cache for frame skipping
+            self._last_action_id = action_id
+            self._last_action_buttons = action_buttons
+            
+            # Send action to Lua script (include action_id for reliable Lua-side lookup)
+            action_sent = await self.websocket_server.send_action(action_buttons, frame_id, action_id=action_id)
             
             if action_sent:
                 self.logger.debug(f"Sent action {action_id} (buttons: {action_buttons}) for frame {frame_id}")
@@ -740,26 +769,39 @@ class MarioTrainer:
         """
         Convert action ID to button mapping.
         
+        MUST match the Lua ACTION_MAPPING table exactly:
+          [0]  = No action
+          [1]  = Right
+          [2]  = Left
+          [3]  = Jump (A)
+          [4]  = Right + Jump
+          [5]  = Left + Jump
+          [6]  = Run/Fire (B)
+          [7]  = Right + Run
+          [8]  = Left + Run
+          [9]  = Right + Jump + Run
+          [10] = Left + Jump + Run
+          [11] = Crouch/Down
+        
         Args:
             action_id: Action identifier (0-11)
             
         Returns:
             Button state dictionary
         """
-        # Mario action mapping (simplified)
         action_map = {
-            0: {},  # No action
-            1: {'right': True},  # Move right
-            2: {'right': True, 'A': True},  # Run right
-            3: {'right': True, 'B': True},  # Jump right
-            4: {'right': True, 'A': True, 'B': True},  # Run jump right
-            5: {'left': True},  # Move left
-            6: {'left': True, 'A': True},  # Run left
-            7: {'left': True, 'B': True},  # Jump left
-            8: {'left': True, 'A': True, 'B': True},  # Run jump left
-            9: {'B': True},  # Jump
-            10: {'A': True},  # Run/Fire
-            11: {'down': True}  # Duck
+            0:  {},                                          # No action
+            1:  {'right': True},                             # Right
+            2:  {'left': True},                              # Left
+            3:  {'A': True},                                 # Jump
+            4:  {'right': True, 'A': True},                  # Right + Jump
+            5:  {'left': True, 'A': True},                   # Left + Jump
+            6:  {'B': True},                                 # Run/Fire
+            7:  {'right': True, 'B': True},                  # Right + Run
+            8:  {'left': True, 'B': True},                   # Left + Run
+            9:  {'right': True, 'A': True, 'B': True},      # Right + Jump + Run
+            10: {'left': True, 'A': True, 'B': True},       # Left + Jump + Run
+            11: {'down': True},                              # Crouch/Down
         }
         
         return action_map.get(action_id, {})

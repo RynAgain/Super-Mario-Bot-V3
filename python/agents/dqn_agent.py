@@ -294,13 +294,17 @@ class DQNAgent:
             priorities = torch.abs(td_errors) + 1e-6
             self.replay_buffer.update_priorities(indices, priorities)
         
-        # Update target network if needed
-        if self.training_step - self.last_target_update >= self.target_update_frequency:
+        # Update target network (soft update every step, hard update periodically)
+        tau = self.config.get('tau', 0.0)
+        if tau > 0:
+            # Soft update (Polyak averaging) every step
+            self._soft_update_target_network(tau)
+        elif self.training_step - self.last_target_update >= self.target_update_frequency:
+            # Hard update periodically
             self._update_target_network()
             self.last_target_update = self.training_step
         
-        # Update exploration rate
-        self._update_epsilon()
+        # Do NOT update epsilon here -- it is now updated per-episode in episode_end()
         
         self.training_step += 1
         
@@ -372,20 +376,39 @@ class DQNAgent:
         return weighted_loss, td_errors.detach()
     
     def _update_target_network(self):
-        """Update target network with current network weights."""
+        """Hard update: copy main network weights to target network."""
         self.target_network.load_state_dict(self.q_network.state_dict())
-        self.logger.debug(f"Target network updated at step {self.training_step}")
+        self.logger.debug(f"Target network hard-updated at step {self.training_step}")
+    
+    def _soft_update_target_network(self, tau: float):
+        """
+        Soft update: blend main network weights into target network.
+        
+        target = tau * main + (1 - tau) * target
+        
+        Args:
+            tau: Interpolation factor (0.005 is typical)
+        """
+        for target_param, main_param in zip(self.target_network.parameters(),
+                                            self.q_network.parameters()):
+            target_param.data.copy_(tau * main_param.data + (1.0 - tau) * target_param.data)
     
     def _update_epsilon(self):
-        """Update exploration rate."""
+        """
+        Update exploration rate. Called per-EPISODE (not per step).
+        
+        Per-step decay with rate 0.9995 takes ~6000 steps to reach 0.05,
+        which means epsilon barely moves during early training.
+        Per-episode decay with rate 0.998 reaches 0.05 in ~1500 episodes.
+        """
         if self.epsilon_decay_type == 'exponential':
             self.epsilon = max(
                 self.epsilon_end,
                 self.epsilon * self.epsilon_decay
             )
         elif self.epsilon_decay_type == 'linear':
-            decay_steps = self.config.get('epsilon_decay_steps', 50000)
-            decay_amount = (self.epsilon_start - self.epsilon_end) / decay_steps
+            decay_episodes = self.config.get('epsilon_decay_episodes', 3000)
+            decay_amount = (self.epsilon_start - self.epsilon_end) / decay_episodes
             self.epsilon = max(
                 self.epsilon_end,
                 self.epsilon - decay_amount
@@ -401,6 +424,9 @@ class DQNAgent:
         """
         self.episode += 1
         self.episode_rewards.append(total_reward)
+        
+        # Decay epsilon ONCE per episode (not per training step)
+        self._update_epsilon()
         
         # Reset preprocessor for new episode
         self.preprocessor.reset()
