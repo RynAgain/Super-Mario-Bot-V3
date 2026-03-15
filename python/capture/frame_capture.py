@@ -168,8 +168,13 @@ class WindowCapture:
             return False
 
 
-class FramePreprocessor:
-    """Handles frame preprocessing for neural network input."""
+class GameFramePreprocessor:
+    """Handles frame preprocessing for neural network input.
+    
+    NOTE: This is distinct from utils.preprocessing.FramePreprocessor which
+    handles tensor conversions. This class works with raw numpy frames from
+    window capture.
+    """
     
     def __init__(self, target_size: Tuple[int, int] = (84, 84)):
         """
@@ -282,7 +287,7 @@ class FrameCapture:
             frame_stack_size: Number of frames to stack
             target_size: Target frame size for neural network
         """
-        self.preprocessor = FramePreprocessor(target_size)
+        self.preprocessor = GameFramePreprocessor(target_size)
         try:
             self.window_capture = WindowCapture(window_title)
             self._use_mss = False

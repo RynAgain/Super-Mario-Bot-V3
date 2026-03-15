@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "super-mario-ai"
+version = "3.1.0"
+description = "AI training system for Super Mario Bros using Dueling DQN and FCEUX emulator"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+
+dependencies = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0.0",
+    "numpy>=1.24.0",
+    "PyYAML>=6.0",
+    "pandas>=2.0.0",
+    "websockets>=12.0",
+    "tqdm>=4.65.0",
+    "psutil>=5.9.0",
+    "matplotlib>=3.5.0",
+]
+
+[project.optional-dependencies]
+gpu = ["GPUtil>=1.4.0"]
+win = ["pywin32>=306"]
+dev = [
+    "pytest>=7.4.0",
+    "black>=23.0.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+mario-train = "python.main:main"
+
+[tool.setuptools.packages.find]
+include = ["python*", "config*", "lua*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"

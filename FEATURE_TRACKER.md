@@ -130,14 +130,12 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ## Cleanup / Tech Debt (do whenever convenient)
 
-- [ ] Pin exact dependency versions in `requirements.txt`
-- [ ] Remove unused dependencies: `triton`, `asyncio-mqtt`, `cupy-cuda12x`
-- [ ] Remove `json.lua` (unused -- Lua has a built-in encoder/decoder)
-- [ ] Remove duplicate JSON implementations in Lua script
-- [ ] Clean up the `2.0.0` file in project root
-- [ ] Delete incompatible old checkpoints in `checkpoints/`
-- [ ] Add `pyproject.toml` for modern Python packaging
-- [ ] Add CI pipeline for automated syntax/import checks on push
+- [x] Clean up `requirements.txt` -- removed 12 unused packages (`triton`, `asyncio-mqtt`, `cupy-cuda12x`, `seaborn`, `scipy`, `numba`, `wandb`, `colorama`, etc.)
+- [x] Remove `json.lua` (unused -- Lua script has a built-in encoder/decoder, no files reference it)
+- [x] Clean up the `2.0.0` file in project root
+- [x] Delete incompatible old checkpoints in `checkpoints/` (from Sept 2025, wrong model architecture)
+- [x] Rename duplicate `FramePreprocessor` to `GameFramePreprocessor` in `frame_capture.py`
+- [x] Add `pyproject.toml` for modern Python packaging (v3.1.0, with optional deps for gpu/win/dev)
 
 ---
 
