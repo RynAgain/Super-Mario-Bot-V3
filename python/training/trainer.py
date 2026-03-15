@@ -211,6 +211,9 @@ class MarioTrainer:
         # Register binary handler for game state data
         self.websocket_server.register_binary_handler(self._handle_game_state)
         
+        # Register screen frame handler for Lua gui.gdscreenshot() data
+        self.websocket_server.register_screen_frame_handler(self._handle_screen_frame)
+        
         # Register JSON handlers for control messages
         self.websocket_server.register_json_handler('episode_event', self._handle_episode_event)
         self.websocket_server.register_json_handler('frame_advance', self._handle_frame_advance)
@@ -262,6 +265,15 @@ class MarioTrainer:
                 return
             
             self.logger.info("Client connected, starting training loop...")
+            
+            # Start frame capture from FCEUX window
+            try:
+                self.frame_capture.start_capture()
+                self.logger.info("Frame capture started successfully")
+            except Exception as e:
+                self.logger.warning(f"Frame capture start failed: {e}")
+                self.logger.warning("Training will continue with zero frames - DQN relies on state vector only")
+                self.logger.warning("Make sure FCEUX window is visible and not minimized")
             
             # Skip real-time plotting to prevent freezing issues
             # The plotter will still create static analysis at the end
@@ -830,6 +842,22 @@ class MarioTrainer:
         frame_id = data.get('frame_id')
         # Frame synchronization is handled automatically by the WebSocket server
     
+    async def _handle_screen_frame(self, frame_id: int, gd_data: bytes):
+        """
+        Handle screen frame captured by Lua's gui.gdscreenshot().
+        
+        Decodes GD format image and pushes it into the frame capture buffer.
+        This replaces Win32 GDI window capture with direct emulator pixel access.
+        
+        Args:
+            frame_id: Frame identifier from Lua
+            gd_data: Raw GD format image bytes
+        """
+        try:
+            self.frame_capture.handle_lua_screen_frame(gd_data)
+        except Exception as e:
+            self.logger.error(f"Error processing Lua screen frame {frame_id}: {e}")
+    
     async def _handle_lua_error(self, data: Dict[str, Any]):
         """Handle error from Lua script."""
         error_code = data.get('error_code')
@@ -963,6 +991,11 @@ class MarioTrainer:
         self.logger.info("Cleaning up resources...")
         
         try:
+            # Stop frame capture thread
+            if self.frame_capture and self.frame_capture.is_capturing:
+                self.frame_capture.stop_capture()
+                self.logger.info("Frame capture stopped")
+            
             # Stop WebSocket server
             if self.websocket_server:
                 await self.websocket_server.stop_server()

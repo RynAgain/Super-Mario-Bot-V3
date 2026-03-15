@@ -64,7 +64,7 @@ class WebSocketServer:
         self.server = None
         self.client_websocket: Optional[WebSocketServerProtocol] = None
         self.is_running = False
-        self.protocol_version = "1.1"  # Updated for enhanced features support
+        self.protocol_version = "1.1"
         
         # Enhanced features configuration
         self.enhanced_features = enhanced_features
@@ -75,6 +75,7 @@ class WebSocketServer:
         self.json_handlers: Dict[str, Callable] = {}
         self.binary_handler: Optional[Callable] = None
         self.enhanced_state_handler: Optional[Callable] = None
+        self.screen_frame_handler: Optional[Callable] = None  # Handler for Lua screen captures
         
         # Connection state and health monitoring
         self.connection_state = ConnectionState()
@@ -175,6 +176,15 @@ class WebSocketServer:
         """
         self.enhanced_state_handler = handler
     
+    def register_screen_frame_handler(self, handler: Callable):
+        """
+        Register a handler for screen frame data from Lua gui.gdscreenshot().
+        
+        Args:
+            handler: Async function(frame_id: int, gd_data: bytes)
+        """
+        self.screen_frame_handler = handler
+    
     def set_enhanced_features(self, enabled: bool):
         """
         Enable or disable enhanced features mode.
@@ -206,7 +216,7 @@ class WebSocketServer:
                 handler_wrapper,
                 self.host,
                 self.port,
-                max_size=65536,  # 64KB buffer
+                max_size=524288,  # 512KB buffer (GD screenshots are ~240KB)
                 max_queue=1,     # Back-pressure: limit queued messages
                 compression=None,  # Disable compression for latency
                 ping_interval=None,  # DISABLED - Lua client can't respond to WS pings
@@ -323,14 +333,36 @@ class WebSocketServer:
             message: Binary message data
         """
         try:
-            # Validate message size limits
-            if len(message) > 65536:  # 64KB limit
-                self.logger.warning(f"Binary message too large: {len(message)} bytes, dropping frame")
+            # Validate message size limits (512KB for screenshots)
+            if len(message) > 524288:
+                self.logger.warning(f"Binary message too large: {len(message)} bytes, dropping")
                 return
             
-            # Validate minimum message structure
+            # Validate minimum structure (need at least 1 byte for type)
+            if len(message) < 5:
+                self.logger.warning(f"Binary message too short: {len(message)} bytes")
+                return
+            
+            # Peek at first byte to determine message type
+            msg_type = message[0]
+            
+            # Type 0x02: Screen frame from gui.gdscreenshot()
+            # Header: 1 byte type + 4 byte frame_id, then raw GD image data
+            if msg_type == 0x02:
+                frame_id = struct.unpack('<I', message[1:5])[0]
+                gd_data = message[5:]
+                self.logger.debug(f"Received screen frame for frame {frame_id} ({len(gd_data)} bytes)")
+                
+                if self.screen_frame_handler:
+                    try:
+                        await self.screen_frame_handler(frame_id, gd_data)
+                    except Exception as e:
+                        self.logger.error(f"Screen frame handler error: {e}")
+                return
+            
+            # Type 0x01: Game state (original 8-byte header)
             if len(message) < 8:
-                self.logger.warning(f"Binary message too short: {len(message)} bytes, expected at least 8 bytes for header")
+                self.logger.warning(f"Game state message too short: {len(message)} bytes")
                 return
             
             # Parse header (8 bytes) with error handling
@@ -342,7 +374,7 @@ class WebSocketServer:
                 return
             
             # Validate message type
-            if msg_type != 0x01:  # game_state
+            if msg_type != 0x01:
                 self.logger.warning(f"Unknown binary message type: {msg_type}, dropping frame")
                 return
             

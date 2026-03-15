@@ -5,7 +5,7 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ---
 
-## Phase 0: Recently Fixed (v3.1)
+## Phase 0: Critical Bugfix Pass (v3.1)
 
 - [x] Fix action mapping mismatch between Python trainer and Lua `ACTION_MAPPING`
 - [x] Fix binary payload double-header parsing in `frame_capture.py`
@@ -18,65 +18,93 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ---
 
-## Phase 1: Make It Run (do these first -- nothing learns until these work)
+## Phase 1: Make It Run
 
-> **Goal:** Python starts, Lua connects, game state flows, actions execute, episodes reset.
-
-- [ ] **P0** -- Run an end-to-end smoke test: start Python, load Lua in FCEUX, confirm mario_x increases in logs
-- [x] **P0** -- Verify save state slot 10 exists and loads World 1-1 correctly (create one manually if missing)
-- [x] **P0** -- Audit memory addresses against NESDev wiki SMB RAM map:
-  - Fixed: Score digits now at `0x07DD-0x07E2` (6 individual decimal digits)
-  - Fixed: Timer digits at `0x07F8-0x07FA` (3 individual decimal digits, not binary word)
-  - Fixed: `MARIO_POWER` moved to `0x0756` (PlayerStatus)
-  - Fixed: `MARIO_VELOCITY_X` moved to `0x0057`, `MARIO_VELOCITY_Y` to `0x009F`
-  - Fixed: `ONEUP_FLAG` moved to `0x075D` (was overlapping END_OF_LEVEL_FLAG)
-- [x] **P1** -- Wrap `GPUtil` import in try/except in `training_utils.py` (crashes if not installed)
-- [x] **P1** -- Fix `WeightInitializer.initialize_model()` using `cls` instead of `self` in `@classmethod`
+- [x] Run end-to-end smoke test: Python + Lua connect, mario_x increases in logs
+- [x] Verify save state slot 10 loads World 1-1 correctly
+- [x] Audit memory addresses against NESDev wiki SMB RAM map:
+  - Score digits: `0x07DD-0x07E2` (6 individual decimal digits)
+  - Timer digits: `0x07F8-0x07FA` (3 individual decimal digits)
+  - `MARIO_POWER`: `0x0756`, `MARIO_VELOCITY_X`: `0x0057`, `MARIO_VELOCITY_Y`: `0x009F`
+  - `ONEUP_FLAG`: `0x075D` (was overlapping END_OF_LEVEL_FLAG)
+- [x] Wrap `GPUtil` import in try/except
+- [x] Fix `WeightInitializer` `@classmethod` using `cls` instead of `self`
 
 ---
 
-## Phase 2: Make It Learn (do these once Phase 1 runs clean)
+## Phase 2: Make It Learn
 
-> **Goal:** Mario consistently moves right and improves over 500+ episodes.
-
-- [x] **P0** -- Reduce warmup from 1000 episodes to 50 (was wasting hours doing random actions with zero learning)
-- [x] **P0** -- Tune epsilon decay: changed from per-step `0.9995` to per-episode `0.998` (~1500 episodes to reach 0.05)
-- [x] **P0** -- Normalize rewards: clip to [-1, +1] range for Q-value stability
-- [x] **P1** -- Add frame skipping: act every 4 frames, repeat action on skipped frames (4x speedup)
-- [x] **P1** -- Switch to soft target updates (Polyak tau=0.005) -- blends weights every training step
-- [ ] **P1** -- Add TensorBoard logging for loss, reward, Q-values, epsilon curves
-- [ ] **P2** -- Log action distribution per episode to detect collapsed exploration
-- [ ] **P2** -- Implement gradient accumulation for larger effective batch sizes
+- [x] Reduce warmup from 1000 to 50 episodes
+- [x] Epsilon decay per-episode (0.998) instead of per-step (0.9995)
+- [x] Reward clipping to [-1, +1] for Q-value stability
+- [x] Frame skipping: act every 4 frames, repeat action on skipped frames
+- [x] Soft target updates (Polyak tau=0.005)
+- [ ] Add TensorBoard logging for loss, reward, Q-values, epsilon curves
+- [ ] Log action distribution per episode to detect collapsed exploration
+- [ ] Implement gradient accumulation for larger effective batch sizes
 
 ---
 
-## Phase 3: Make It Reliable (do these once learning is confirmed)
+## Phase 2.5: Training Log Fixes (from first live run analysis)
+
+- [x] Disable curriculum `epsilon_override` (was locking epsilon at 0.8 for 10k episodes)
+- [x] Increase `stuck_timeout` from 600 to 1800 frames (30s -- Mario needs time for pipe jumps)
+- [x] Fix frame desync at episode boundaries (Lua resets frame_id to 0, now detected as normal)
+- [x] Fix episode triple-counting (trainer, Lua event, and game state handler all created episodes)
+
+---
+
+## Phase 2.75: Frame Capture Overhaul
+
+- [x] **CRITICAL**: Frame capture was never started -- DQN was learning from all-zero 84x84x4 frames
+- [x] Add Lua-side screen capture using `gui.gdscreenshot()` (no window visibility needed)
+- [x] Send screen data as binary message type `0x02` (1-byte type + 4-byte frame_id + GD data)
+- [x] Python GD format decoder: ARGB -> grayscale -> resize 84x84 -> normalize [0,1]
+- [x] Lua captures every 4 frames (matches Python frame_skip) to limit bandwidth
+- [x] Capture priority: Lua frames > Win32 GDI > zero frames
+- [x] State vector: replaced 2 wasted zero slots with `mario_x_vel` and `mario_y_vel`
+- [x] Start/stop capture in trainer lifecycle
+- [x] WebSocket buffer increased to 512KB for screenshot data
+
+---
+
+## Cleanup / Tech Debt (completed)
+
+- [x] Clean up `requirements.txt` (removed 12 unused packages)
+- [x] Remove `json.lua`, `2.0.0` file, old checkpoints
+- [x] Rename duplicate `FramePreprocessor` to `GameFramePreprocessor`
+- [x] Add `pyproject.toml` (v3.1.0)
+- [x] Move 10 test files to `tests/`, 5 scripts to `scripts/`, 6 docs to `docs/`
+- [x] Delete stale validation artifacts
+- [x] Remove `setup.py`, `setup_minimal.py`, `MANIFEST.in`, egg-info
+- [x] Rewrite `README.md` with accurate architecture, action space, parameters
+
+---
+
+## Phase 3: Make It Reliable
 
 > **Goal:** Training runs for hours without crashes or connection drops.
 
 - [ ] **P0** -- Replace hand-rolled Lua WebSocket with a proper library (e.g. `lua-websockets`)
-- [ ] **P1** -- Switch to JSON-only protocol (drop binary) -- saves 100 bytes per frame but eliminates 90% of parsing bugs
-- [ ] **P1** -- Add protocol version negotiation so Lua/Python reject incompatible versions immediately
-- [ ] **P1** -- Frame capture is never started in training loop -- either start it or send pixels from Lua
-- [ ] **P2** -- Deduplicate `FramePreprocessor` (exists in both `preprocessing.py` and `frame_capture.py`)
-- [ ] **P2** -- Auto-create World 1-1 save state on first run
+- [ ] **P1** -- Switch to JSON-only protocol (drop binary) -- eliminates parsing bugs
+- [x] **P1** -- Protocol version negotiation: Lua checks `init_ack.protocol_version` and warns on mismatch
+- [x] **P2** -- Auto-create save state: if slot 10 is empty, auto-save current state on first run
 
 ---
 
-## Phase 4: Make It Fast (do these once stability is solid)
+## Phase 4: Make It Fast
 
 > **Goal:** Train 10x faster to iterate on reward design.
 
-- [ ] **P1** -- Send screen pixels from Lua via binary payload instead of Win32 GDI window capture
-- [ ] **P1** -- Implement n-step returns (n=3) for faster value propagation
-- [ ] **P1** -- Run multiple FCEUX instances in parallel for faster experience collection
-- [ ] **P2** -- Enable prioritized experience replay (already implemented but disabled)
+- [x] **P1** -- N-step returns (n=3): buffer N transitions, compute discounted return, bootstrap with gamma^n
+- [ ] **P1** -- Run multiple FCEUX instances in parallel
+- [x] **P2** -- Prioritized experience replay enabled (`prioritized_replay: true`)
 - [ ] **P2** -- Try Noisy Networks as alternative to epsilon-greedy
-- [ ] **P2** -- Experiment with Rainbow DQN (combines 6 improvements in one)
+- [ ] **P2** -- Experiment with Rainbow DQN
 
 ---
 
-## Phase 5: Make It Smart (research / stretch goals)
+## Phase 5: Make It Smart
 
 > **Goal:** Complete World 1-1 reliably, then generalize to other levels.
 
@@ -100,42 +128,29 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ### Per-Level Save States
 - [ ] When a new level is detected for the first time, auto-create a save state at the start of that level
-- [ ] Assign a dedicated save state slot per level (e.g. slot 10 = 1-1, slot 11 = 1-2, slot 12 = 1-3, slot 13 = 1-4, slot 14 = 2-1, ...)
+- [ ] Assign a dedicated save state slot per level (e.g. slot 10 = 1-1, slot 11 = 1-2, etc.)
 - [ ] On episode reset, load the save state for whichever level the agent is currently training on
 - [ ] Store save state metadata (world, level, power state, lives) in a JSON manifest
 
 ### Per-Level Models
-- [ ] Maintain a separate checkpoint directory per level: `checkpoints/world1-1/`, `checkpoints/world1-2/`, etc.
-- [ ] When starting training on a new level, initialize the model from the best checkpoint of the previous level (transfer learning)
-- [ ] This lets the agent skip re-learning basic movement and jumping on each new level
+- [ ] Maintain a separate checkpoint directory per level: `checkpoints/world1-1/`, etc.
+- [ ] When starting training on a new level, initialize from the best checkpoint of the previous level
 - [ ] Track per-level metrics independently: completion rate, best distance, average reward
 
 ### Auto-Curriculum Progression
 - [ ] Define a completion threshold per level (e.g. 80% completion rate over last 100 episodes)
 - [ ] When the threshold is met, automatically advance to the next level
-- [ ] If performance drops below a regression threshold (e.g. 40%), fall back to the previous level for refresher training
+- [ ] If performance drops below a regression threshold (e.g. 40%), fall back for refresher training
 - [ ] Support manual override to force training on a specific level
 
 ### Level-Specific Reward Tuning
-- [ ] Allow per-level reward configuration (e.g. underwater levels might weight survival higher)
+- [ ] Allow per-level reward configuration (e.g. underwater levels weight survival higher)
 - [ ] Adjust level length constants per level for accurate progress calculation
 - [ ] Add level-specific hazard detection (e.g. lava in castle levels, water in 2-2)
 
 ### Model Merging / Ensemble (stretch)
 - [ ] Experiment with distilling all per-level models into a single universal model
 - [ ] Try an ensemble approach where a meta-controller selects which level-specific model to use
-- [ ] Evaluate whether a single model trained across all levels outperforms the per-level approach
-
----
-
-## Cleanup / Tech Debt (do whenever convenient)
-
-- [x] Clean up `requirements.txt` -- removed 12 unused packages (`triton`, `asyncio-mqtt`, `cupy-cuda12x`, `seaborn`, `scipy`, `numba`, `wandb`, `colorama`, etc.)
-- [x] Remove `json.lua` (unused -- Lua script has a built-in encoder/decoder, no files reference it)
-- [x] Clean up the `2.0.0` file in project root
-- [x] Delete incompatible old checkpoints in `checkpoints/` (from Sept 2025, wrong model architecture)
-- [x] Rename duplicate `FramePreprocessor` to `GameFramePreprocessor` in `frame_capture.py`
-- [x] Add `pyproject.toml` for modern Python packaging (v3.1.0, with optional deps for gpu/win/dev)
 
 ---
 

@@ -267,16 +267,84 @@ class GameFramePreprocessor:
         return stacked_frames
 
 
+def decode_gd_screenshot(gd_data: bytes, target_size: Tuple[int, int] = (84, 84)) -> Optional[np.ndarray]:
+    """
+    Decode FCEUX gui.gdscreenshot() GD-format image to grayscale numpy array.
+    
+    FCEUX's GD truecolor format:
+      Bytes 0-1:   0xFF 0xFE (truecolor signature)
+      Bytes 2-3:   width  (big-endian uint16)
+      Bytes 4-5:   height (big-endian uint16)
+      Byte  6:     transparent flag
+      Bytes 7-10:  transparent color (4 bytes)
+      Bytes 11+:   pixel data, row-major, 4 bytes per pixel (ARGB, big-endian)
+    
+    NES resolution: 256x240 = 61440 pixels * 4 = 245760 bytes + 11 header = 245771 total
+    
+    Args:
+        gd_data: Raw GD format bytes from gui.gdscreenshot()
+        target_size: Output size (width, height) for resize
+        
+    Returns:
+        Grayscale numpy array of target_size, or None on error
+    """
+    try:
+        if len(gd_data) < 11:
+            return None
+        
+        # Parse header
+        sig = (gd_data[0] << 8) | gd_data[1]
+        width = (gd_data[2] << 8) | gd_data[3]
+        height = (gd_data[4] << 8) | gd_data[5]
+        
+        # Validate
+        if width <= 0 or height <= 0 or width > 512 or height > 512:
+            return None
+        
+        expected_size = 11 + (width * height * 4)
+        if len(gd_data) < expected_size:
+            return None
+        
+        # Extract pixel data (skip 11-byte header)
+        pixel_data = gd_data[11:11 + width * height * 4]
+        
+        # Parse ARGB pixels into numpy array
+        # Each pixel: 4 bytes = A, R, G, B (big-endian order from GD)
+        raw = np.frombuffer(pixel_data, dtype=np.uint8).reshape(height, width, 4)
+        
+        # Extract RGB channels (skip alpha at index 0)
+        # GD format is ARGB, so: raw[:,:,0]=A, raw[:,:,1]=R, raw[:,:,2]=G, raw[:,:,3]=B
+        rgb = raw[:, :, 1:4]  # R, G, B
+        
+        # Convert to grayscale using standard luminance weights
+        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        
+        # Resize to target
+        resized = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
+        
+        # Normalize to [0, 1]
+        normalized = resized.astype(np.float32) / 255.0
+        
+        return normalized
+        
+    except Exception:
+        return None
+
+
 class FrameCapture:
     """
     Main frame capture system that coordinates window capture,
     preprocessing, and synchronization.
+    
+    Supports two capture modes:
+    1. Lua screen capture (preferred): receives frames from gui.gdscreenshot() via WebSocket
+    2. Win32 GDI capture (fallback): captures FCEUX window pixels directly
     """
     
     def __init__(self,
                  window_title: str = "FCEUX",
-                 target_fps: int = 30,         # ↓ from 60
-                 frame_stack_size: int = 4,    # ↓ from 8
+                 target_fps: int = 30,
+                 frame_stack_size: int = 4,
                  target_size: Tuple[int, int] = (84, 84)):
         """
         Initialize frame capture system.
@@ -288,14 +356,23 @@ class FrameCapture:
             target_size: Target frame size for neural network
         """
         self.preprocessor = GameFramePreprocessor(target_size)
+        self.target_size = target_size
+        
+        # Lua capture mode (preferred -- no window visibility needed)
+        self._lua_capture_enabled = False
+        self._lua_frame_count = 0
+        
+        # Win32 capture mode (fallback)
         try:
             self.window_capture = WindowCapture(window_title)
             self._use_mss = False
         except Exception:
-            # Fallback to monitor/region grab to avoid GDI/occlusion issues
-            from mss import mss
-            self._mss = mss()
-            self._use_mss = True
+            try:
+                from mss import mss
+                self._mss = mss()
+                self._use_mss = True
+            except ImportError:
+                self._use_mss = False
         
         self.target_fps = target_fps
         self.frame_interval = 1.0 / target_fps
@@ -324,6 +401,34 @@ class FrameCapture:
         # Setup logging
         self.logger = logging.getLogger(__name__)
     
+    def handle_lua_screen_frame(self, gd_data: bytes):
+        """
+        Handle screen frame received from Lua's gui.gdscreenshot().
+        
+        This is the preferred capture mode -- frames come directly from the
+        emulator internals, no window visibility required.
+        
+        Args:
+            gd_data: Raw GD format image bytes
+        """
+        frame = decode_gd_screenshot(gd_data, self.target_size)
+        if frame is not None:
+            # Add channel dimension: (84, 84) -> (84, 84, 1)
+            processed = np.expand_dims(frame, axis=-1)
+            self.processed_frame_buffer.append(processed)
+            self._lua_capture_enabled = True
+            self._lua_frame_count += 1
+            self.capture_stats['frames_captured'] += 1
+            
+            # Notify callbacks
+            for callback in self.frame_callbacks:
+                try:
+                    callback(processed, time.time())
+                except Exception as e:
+                    self.logger.error(f"Frame callback error: {e}")
+        else:
+            self.capture_stats['frames_dropped'] += 1
+    
     def register_frame_callback(self, callback: Callable[[np.ndarray, float], None]):
         """
         Register callback for captured frames.
@@ -334,19 +439,32 @@ class FrameCapture:
         self.frame_callbacks.append(callback)
     
     def start_capture(self):
-        """Start frame capture in background thread."""
+        """Start frame capture in background thread.
+        
+        If Lua screen capture is active (frames arriving via handle_lua_screen_frame),
+        the Win32 capture thread is not started -- Lua frames are preferred.
+        """
         if self.is_capturing:
             self.logger.warning("Frame capture already running")
             return
         
-        if not self.window_capture.is_window_available():
-            raise RuntimeError("FCEUX window not found")
+        if self._lua_capture_enabled:
+            self.logger.info("Using Lua screen capture mode (no window capture needed)")
+            self.is_capturing = True
+            return
+        
+        # Fallback: try Win32 GDI window capture
+        if not hasattr(self, 'window_capture') or not self.window_capture.is_window_available():
+            self.logger.warning("FCEUX window not found for GDI capture")
+            self.logger.warning("Frames will come from Lua gui.gdscreenshot() when available")
+            self.is_capturing = True  # Mark as running even without GDI
+            return
         
         self.is_capturing = True
         self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.capture_thread.start()
         
-        self.logger.info(f"Started frame capture at {self.target_fps} FPS")
+        self.logger.info(f"Started Win32 frame capture at {self.target_fps} FPS")
     
     def stop_capture(self):
         """Stop frame capture."""
@@ -657,20 +775,20 @@ class FrameCapture:
                 frames = np.zeros(expected_shape, dtype=np.float32)
             
             # Create state vector from game state (12 elements to match DQN model)
+            # All features normalized to approximately [0, 1] or [-1, 1] range
             state_vector = np.array([
-                game_state.get('mario_x', 0) / 3000.0,  # Normalize position
-                game_state.get('mario_y', 0) / 240.0,   # Normalize Y position
-                game_state.get('mario_state', 0) / 10.0, # Normalize state
-                game_state.get('lives', 3) / 10.0,      # Normalize lives
-                game_state.get('powerup', 0) / 3.0,     # Normalize powerup
-                game_state.get('time', 400) / 400.0,    # Normalize time
-                game_state.get('coins', 0) / 100.0,     # Normalize coins
-                game_state.get('score', 0) / 1000000.0, # Normalize score
-                # Additional features to reach 12 elements
-                float(game_state.get('world', 1) - 1) / 7.0,  # World (0-7 normalized)
-                float(game_state.get('level', 1) - 1) / 3.0,  # Level (0-3 normalized)
-                0.0,  # Reserved feature 1
-                0.0   # Reserved feature 2
+                game_state.get('mario_x', 0) / 3168.0,             # X position (World 1-1 length)
+                game_state.get('mario_y', 0) / 240.0,              # Y position (screen height)
+                game_state.get('mario_x_vel', 0) / 40.0,           # X velocity (signed, typical range -40 to 40)
+                game_state.get('mario_y_vel', 0) / 40.0,           # Y velocity (signed, typical range -40 to 40)
+                game_state.get('lives', 3) / 5.0,                  # Lives (max ~5)
+                game_state.get('powerup', 0) / 2.0,                # Power state (0=small, 1=big, 2=fire)
+                game_state.get('time', 400) / 400.0,               # Timer
+                game_state.get('coins', 0) / 99.0,                 # Coins (max 99)
+                game_state.get('score', 0) / 100000.0,             # Score
+                float(game_state.get('world', 1)) / 8.0,           # World number
+                float(game_state.get('level', 1)) / 4.0,           # Level number
+                float(game_state.get('mario_state', 0)) / 11.0,    # Player state byte
             ], dtype=np.float32)
             
             # Ensure state vector has correct shape

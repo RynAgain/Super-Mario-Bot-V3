@@ -1749,6 +1749,40 @@ local function send_game_state(game_state)
     return send_websocket_message(g_state.websocket, binary_data, true)
 end
 
+-- Capture and send screen frame via gui.gdscreenshot()
+-- The GD format string is sent as binary message type 0x02
+-- Only called every N frames to limit bandwidth (~240KB per screenshot)
+local g_screen_capture_interval = 4  -- Capture every 4 frames (matches Python frame_skip)
+local g_screen_capture_counter = 0
+
+local function send_screen_frame()
+    if not g_state.websocket then return false end
+    if not gui or not gui.gdscreenshot then
+        -- gui.gdscreenshot not available in this FCEUX build
+        return false
+    end
+    
+    -- Only capture every N frames to limit bandwidth
+    g_screen_capture_counter = g_screen_capture_counter + 1
+    if g_screen_capture_counter < g_screen_capture_interval then
+        return true  -- Skip this frame, not an error
+    end
+    g_screen_capture_counter = 0
+    
+    -- Capture screen pixels directly from emulator (no window capture needed)
+    local ok, gd_data = pcall(gui.gdscreenshot)
+    if not ok or not gd_data then
+        debug_log("gui.gdscreenshot() failed", "WARN")
+        return false
+    end
+    
+    -- Build binary packet: 1-byte type (0x02) + 4-byte frame_id + GD image data
+    local header = pack_u8(0x02) .. pack_u32_le(g_state.frame_id)
+    local packet = header .. gd_data
+    
+    return send_websocket_message(g_state.websocket, packet, true)
+end
+
 -- Send frame advance confirmation
 local function send_frame_advance()
     local frame_msg = {
@@ -1935,7 +1969,23 @@ local function reset_game_to_level_1_1()
             savestate_loaded = true
             debug_log("Successfully loaded save state from slot 10")
         else
-            debug_log("Failed to load save state from slot 10", "WARN")
+            debug_log("Save state slot 10 is empty or failed to load", "WARN")
+            
+            -- AUTO-CREATE: Save current state to slot 10 for future resets
+            -- This assumes the game is currently at World 1-1 start
+            debug_log("Auto-creating save state in slot 10 from current game state...")
+            local save_success = pcall(savestate.save, st)
+            if save_success then
+                debug_log("Auto-created save state in slot 10 -- future resets will use this")
+                -- Now try loading it to verify
+                local verify = pcall(savestate.load, st)
+                if verify then
+                    savestate_loaded = true
+                    debug_log("Verified: auto-created save state loads correctly")
+                end
+            else
+                debug_log("Failed to auto-create save state", "ERROR")
+            end
         end
     else
         debug_log("savestate API not available", "ERROR")
@@ -2062,6 +2112,16 @@ local function process_received_message(data, opcode)
         end
         
         if message.type == "init_ack" then
+            -- Protocol version check
+            local server_version = message.protocol_version or "unknown"
+            if server_version ~= CONFIG.PROTOCOL_VERSION and server_version ~= "unknown" then
+                debug_log(string.format("WARNING: Protocol version mismatch! Lua=%s, Python=%s",
+                          CONFIG.PROTOCOL_VERSION, server_version), "WARN")
+                debug_log("Communication may be unreliable. Update both sides to match.", "WARN")
+            else
+                debug_log("Protocol version OK: " .. server_version)
+            end
+            
             debug_log("Received initialization acknowledgment")
             g_state.training_active = true
             
@@ -2282,6 +2342,9 @@ local function process_frame()
     end
     
     if send_game_state(game_state) then
+        -- Also send screen frame (captured from emulator internals, no window needed)
+        send_screen_frame()
+        
         -- NON-BLOCKING approach - don't pause emulation
         g_state.waiting_for_action = true
         g_state.pending_action = nil

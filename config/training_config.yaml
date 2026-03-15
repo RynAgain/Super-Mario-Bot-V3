@@ -36,7 +36,8 @@ training:
   
   # Advanced Training Options
   double_dqn: true                # Enable Double DQN
-  prioritized_replay: false       # Enable prioritized experience replay
+  prioritized_replay: true        # Enable prioritized experience replay (was false)
+  n_step: 3                       # N-step returns for faster value propagation
   noisy_networks: false           # Enable noisy networks for exploration
   
   # Curriculum Learning

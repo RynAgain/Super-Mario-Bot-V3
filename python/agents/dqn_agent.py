@@ -87,6 +87,10 @@ class DQNAgent:
         # Initialize preprocessor
         self.preprocessor = MarioPreprocessor(device=str(self.device))
         
+        # N-step returns buffer
+        self.n_step = config.get('n_step', 3)
+        self.n_step_buffer = deque(maxlen=self.n_step)
+        
         # Training state
         self.episode = 0
         self.step = 0
@@ -212,7 +216,13 @@ class DQNAgent:
         done: bool
     ):
         """
-        Store experience in replay buffer.
+        Store experience using n-step returns.
+        
+        Buffers N transitions and computes discounted n-step return:
+          R_n = r_0 + gamma * r_1 + gamma^2 * r_2 + ... + gamma^(n-1) * r_{n-1}
+        
+        The replay buffer stores (s_0, a_0, R_n, s_n, done_n) instead of
+        single-step transitions, enabling faster value propagation.
         
         Args:
             state_frames: Current frame stack
@@ -223,15 +233,56 @@ class DQNAgent:
             next_state_vector: Next state vector
             done: Episode termination flag
         """
-        self.replay_buffer.add(
-            state_frames.squeeze(0).cpu(),  # Remove batch dimension
+        # Add transition to n-step buffer
+        self.n_step_buffer.append((
+            state_frames.squeeze(0).cpu(),
             state_vector.squeeze(0).cpu(),
             action,
             reward,
             next_state_frames.squeeze(0).cpu(),
             next_state_vector.squeeze(0).cpu(),
             done
-        )
+        ))
+        
+        # Flush buffer when full or on terminal state
+        if len(self.n_step_buffer) == self.n_step or done:
+            # Compute n-step discounted return
+            n_step_return = 0.0
+            for i in reversed(range(len(self.n_step_buffer))):
+                _, _, _, r, _, _, d = self.n_step_buffer[i]
+                n_step_return = r + self.gamma * n_step_return * (not d)
+            
+            # Use first transition's state and action, last transition's next_state
+            first = self.n_step_buffer[0]
+            last = self.n_step_buffer[-1]
+            
+            self.replay_buffer.add(
+                first[0],  # state_frames from step 0
+                first[1],  # state_vector from step 0
+                first[2],  # action from step 0
+                n_step_return,  # n-step discounted return
+                last[4],   # next_state_frames from step n
+                last[5],   # next_state_vector from step n
+                last[6]    # done flag from step n
+            )
+            
+            # On terminal state, flush all remaining partial sequences
+            if done:
+                # Store remaining partial n-step returns
+                for start_idx in range(1, len(self.n_step_buffer)):
+                    partial_return = 0.0
+                    for i in reversed(range(start_idx, len(self.n_step_buffer))):
+                        _, _, _, r, _, _, d = self.n_step_buffer[i]
+                        partial_return = r + self.gamma * partial_return * (not d)
+                    
+                    entry = self.n_step_buffer[start_idx]
+                    self.replay_buffer.add(
+                        entry[0], entry[1], entry[2],
+                        partial_return,
+                        last[4], last[5], last[6]
+                    )
+                
+                self.n_step_buffer.clear()
     
     def train_step(self) -> Dict[str, float]:
         """
@@ -355,8 +406,11 @@ class DQNAgent:
                 next_q_values = self.target_network(next_state_frames, next_state_vectors)
                 next_q_values = next_q_values.max(dim=1)[0]
             
-            # Compute target Q-values
-            target_q_values = rewards + (self.gamma * next_q_values * (~dones))
+            # Compute target Q-values with n-step bootstrap
+            # rewards already contain the n-step discounted sum: R_n = r_0 + g*r_1 + ... + g^(n-1)*r_{n-1}
+            # The bootstrap term uses gamma^n since the next state is N steps away
+            gamma_n = self.gamma ** self.n_step
+            target_q_values = rewards + (gamma_n * next_q_values * (~dones))
         
         # Compute TD errors
         td_errors = target_q_values - current_q_values
@@ -424,6 +478,9 @@ class DQNAgent:
         """
         self.episode += 1
         self.episode_rewards.append(total_reward)
+        
+        # Clear n-step buffer for new episode
+        self.n_step_buffer.clear()
         
         # Decay epsilon ONCE per episode (not per training step)
         self._update_epsilon()
