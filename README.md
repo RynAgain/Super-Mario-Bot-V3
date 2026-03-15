@@ -1,305 +1,237 @@
 # Super Mario Bot V3
 
-A sophisticated AI training system that teaches a neural network to play Super Mario Bros on NES using FCEUX emulator. The system features a Dueling DQN with 8-frame stacking, WebSocket communication between Lua and Python, and comprehensive reward system focused on level progression.
+An AI training system that teaches a neural network to play Super Mario Bros on NES using the FCEUX emulator. Uses a Dueling DQN with 4-frame stacking, WebSocket communication between Lua and Python, and a distance-based reward system focused on level progression.
 
-## 🎮 System Overview
+## System Overview
 
-This project implements a 2-part AI system:
+This project is a 2-part AI system:
 
-1. **Lua Script (FCEUX side)**: Controls frame progression, extracts memory data, executes actions
-2. **Python Script (Training side)**: GPU-accelerated PyTorch training with Dueling DQN, frame capture, and reward calculation
+1. **Lua Script (FCEUX side)** -- Controls frame progression, reads NES memory, executes controller inputs
+2. **Python Trainer (GPU side)** -- Dueling DQN with experience replay, reward calculation, and episode management
+
+### Architecture
+
+```
+FCEUX (NES Emulator)                    Python Trainer
++------------------+                    +------------------+
+| mario_ai.lua     |  WebSocket (8765)  | trainer.py       |
+|  - Memory read   | <===============> |  - DQN Agent     |
+|  - Input execute |  128-byte binary   |  - Reward calc   |
+|  - Frame sync    |  + JSON control    |  - Frame capture |
++------------------+                    +------------------+
+```
 
 ### Key Features
 
-- **Dueling DQN Architecture**: Separate value and advantage streams for better learning
-- **8-Frame Stacking**: Temporal context for understanding movement and animations
-- **Hybrid Communication**: JSON for control messages, binary for high-frequency game data.  (might revise this to make the communiction more uniform, also binary is a pain)
-- **Frame Synchronization**: Multi-layer sync strategy prevents desyncs
-- **Comprehensive Reward System**: Level progression primary, survival/scoring secondary
-- **Real-time Monitoring**: CSV logging and performance tracking
+- **Dueling DQN** with separate value and advantage streams
+- **4-frame stacking** for temporal context (84x84 grayscale)
+- **12-action space** matching standard NES controller combinations
+- **WebSocket communication** -- binary payloads for game state, JSON for control
+- **Frame skipping** -- acts every 4 frames for 4x training speedup
+- **Soft target updates** (Polyak averaging, tau=0.005)
+- **Reward clipping** to [-1, +1] for Q-value stability
+- **Per-episode epsilon decay** (0.998) for balanced exploration
 
-## 🏗️ Architecture
+## Requirements
 
-```mermaid
-graph TB
-    subgraph FCEUX[FCEUX Environment]
-        NES[NES Emulator]
-        LUA[Lua Script]
-        ROM[Super Mario Bros ROM]
-    end
-    
-    subgraph PYTHON[Python Training Environment]
-        WS_SERVER[WebSocket Server]
-        FRAME_CAP[Frame Capture cv2]
-        DQN[Dueling DQN Network]
-        TRAINER[Training Loop]
-        LOGGER[CSV Logger]
-    end
-    
-    NES --> LUA
-    LUA <--> WS_SERVER
-    WS_SERVER --> FRAME_CAP
-    FRAME_CAP --> DQN
-    DQN --> TRAINER
-    TRAINER --> LOGGER
-    DQN --> WS_SERVER
-```
+### Software
+- **FCEUX 2.6.4+** -- NES emulator with Lua scripting ([download](http://fceux.com))
+- **Python 3.10+** with PyTorch 2.0+ and CUDA support
+- **Super Mario Bros (World).nes** ROM file (user must provide legally)
 
-## 📋 Requirements
-
-### Software Dependencies
-- **FCEUX 2.6.4+**: NES emulator with Lua scripting support
-- **Python 3.8+**: With PyTorch GPU support
-- **CUDA 11.8+**: For GPU acceleration (recommended)
-
-### Hardware Requirements
-- **GPU**: NVIDIA GPU with 4GB+ VRAM (recommended)
+### Hardware
+- **GPU**: NVIDIA with 4GB+ VRAM (recommended)
 - **RAM**: 8GB+ system memory
-- **Storage**: 2GB+ free space for models and logs
+- **Storage**: 1GB+ free space
 
-### ROM Requirements
-- Super Mario Bros (World).nes ROM file (user must provide legally)
+## Quick Start
 
-## 🚀 Quick Start
+### 1. Install Dependencies
 
-### Windows Users (Recommended)
-```batch
-# 1. Clone repository
-git clone https://github.com/your-username/Super-Mario-Bot-V3.git
-cd Super-Mario-Bot-V3
-
-# 2. Run automated installation
-install.bat
-
-# 3. Start training with easy launcher
-run_training.bat
-```
-
-### Manual Installation
 ```bash
-# 1. Clone repository
-git clone https://github.com/your-username/Super-Mario-Bot-V3.git
-cd Super-Mario-Bot-V3
-
-# 2. Install Python dependencies
 pip install -r requirements.txt
 
-# 3. Install the package
-pip install -e .
-
-# 4. Validate system
-python validate_system.py
-
-# 5. Run comprehensive tests
-python test_complete_system_integration.py
+# Or with optional dependencies:
+pip install -e ".[gpu,win]"
 ```
 
-### Start Training
+### 2. Create Save State
+
+1. Open FCEUX and load the Super Mario Bros ROM
+2. Start the game and get to World 1-1 gameplay (past title screen)
+3. Save state to **slot 10**: `Shift+F10`
+
+### 3. Start Training
+
+**Terminal 1** -- Start the Python trainer:
 ```bash
-# Option 1: Use the training launcher (Windows)
-run_training.bat
-
-# Option 2: Direct command
 python python/main.py train
-
-# Option 3: With custom configuration
-python python/main.py train --config examples/basic_training.yaml
 ```
 
-### FCEUX Setup
-1. Download FCEUX 2.6.4+ from http://fceux.com
-2. Load Super Mario Bros ROM
-3. Load Lua script: `File > Lua > New Lua Script Window > Browse > lua/mario_ai.lua`
-4. Script should show "Waiting for connection..." message
+**Terminal 2 (FCEUX)** -- Load the Lua script:
+1. Open FCEUX with the ROM loaded
+2. `File > Lua > New Lua Script Window`
+3. Browse to `lua/mario_ai.lua` and click Run
+4. The script will auto-connect to the Python trainer
 
-## 📁 Project Structure
+### 4. Monitor Progress
+
+Watch the Python terminal for log output showing:
+- Episode number and total reward
+- Mario's X position (should increase over time)
+- Epsilon value (exploration rate, decreasing over episodes)
+
+## Project Structure
 
 ```
 Super-Mario-Bot-V3/
-├── docs/                    # Comprehensive documentation
-├── config/                  # YAML configuration files
-├── lua/                     # FCEUX Lua scripts
-├── python/                  # Python training system
-│   ├── core/               # Training components
-│   ├── communication/      # WebSocket handling
-│   ├── game/               # Game-specific logic
-│   ├── neural/             # Neural network components
-│   └── utils/              # Utility modules
-├── data/                   # Models, logs, replays
-└── scripts/                # Utility scripts
+|-- config/                  # YAML configuration files
+|   |-- training_config.yaml # Hyperparameters, WebSocket, training schedule
+|   |-- network_config.yaml  # Neural network architecture
+|   |-- game_config.yaml     # Action space, memory addresses
+|   +-- logging_config.yaml  # Log levels and formats
+|-- lua/
+|   |-- mario_ai.lua         # FCEUX Lua script (main)
+|   +-- mario_ai_fallback.lua
+|-- python/
+|   |-- main.py              # CLI entry point
+|   |-- agents/
+|   |   +-- dqn_agent.py     # DQN agent with replay buffer
+|   |-- capture/
+|   |   +-- frame_capture.py # Window capture and game state parsing
+|   |-- communication/
+|   |   |-- websocket_server.py  # WebSocket server
+|   |   +-- comm_manager.py      # Message routing
+|   |-- environment/
+|   |   |-- reward_calculator.py # Reward system
+|   |   +-- episode_manager.py   # Episode lifecycle
+|   |-- models/
+|   |   +-- dueling_dqn.py      # Dueling DQN network
+|   |-- training/
+|   |   |-- trainer.py          # Main training loop
+|   |   +-- training_utils.py   # State management, health monitoring
+|   +-- utils/
+|       |-- preprocessing.py    # Frame stacking, state normalization
+|       |-- replay_buffer.py    # Experience replay
+|       |-- config_loader.py    # YAML config loading
+|       +-- model_utils.py      # Device management, checkpointing
+|-- FEATURE_TRACKER.md      # Prioritized roadmap and progress
+|-- pyproject.toml           # Python packaging
++-- requirements.txt         # Python dependencies
 ```
 
-## 🧠 Neural Network Architecture
+## Neural Network
 
-### Dueling DQN with 8-Frame Stacking
-- **Input**: 8 consecutive 84x84 grayscale frames + 12-dimensional state vector
-- **Convolutional Layers**: 3 layers for spatial feature extraction
-- **Dueling Streams**: Separate value and advantage estimation
-- **Output**: Q-values for 12 possible actions
+### Dueling DQN (4-frame stack + 12-feature state vector)
+
+```
+Input: 4x84x84 grayscale frames + 12-dim state vector
+  |
+  v
+Conv2d(4, 32, 8x8, stride=4)  -->  ReLU
+Conv2d(32, 64, 4x4, stride=2) -->  ReLU
+Conv2d(64, 64, 3x3, stride=1) -->  ReLU
+  |
+  v  (flatten + concatenate with state vector)
+  |
+Linear(7756, 512)  -->  ReLU  -->  Dropout(0.3)
+  |                                    |
+  v                                    v
+Value Stream                   Advantage Stream
+Linear(512, 256) -> ReLU       Linear(512, 256) -> ReLU
+Linear(256, 1)                 Linear(256, 12)
+  |                                    |
+  +----------> Q = V + (A - mean(A)) <-+
+  |
+  v
+12 Q-values (one per action)
+```
 
 ### Action Space
-```
-0: No Action          6: Run/Fire
-1: Right             7: Right + Run
-2: Left              8: Left + Run
-3: Jump              9: Right + Jump + Run (Forward Jump)
-4: Right + Jump      10: Left + Jump + Run
-5: Left + Jump       11: Crouch/Down
-```
 
-## 🎯 Reward System
+| ID | Action | Buttons |
+|----|--------|---------|
+| 0 | No action | -- |
+| 1 | Right | Right |
+| 2 | Left | Left |
+| 3 | Jump | A |
+| 4 | Right + Jump | Right + A |
+| 5 | Left + Jump | Left + A |
+| 6 | Run/Fire | B |
+| 7 | Right + Run | Right + B |
+| 8 | Left + Run | Left + B |
+| 9 | Right + Jump + Run | Right + A + B |
+| 10 | Left + Jump + Run | Left + A + B |
+| 11 | Crouch | Down |
 
-### Primary Objectives (70%)
-- **Level Progress**: +1 per pixel rightward, +10x for new maximum distance
-- **Level Completion**: +5000 base + time bonus
-- **Milestone Bonuses**: +100-500 for 25%, 50%, 75%, 90% completion
+## Reward System
 
-### Secondary Objectives (25%)
-- **Power-ups**: +200 (big), +400 (fire)
-- **Enemy Elimination**: +100 per enemy
-- **Coin Collection**: +50 per coin
-- **Score Increase**: +0.01 per point
+Rewards are clipped to [-1, +1] for stable Q-learning.
 
-### Penalties (5%)
-- **Death**: -1000 (adjusted by cause and lives remaining)
-- **Backward Movement**: -0.5 per pixel
-- **Stuck Behavior**: -1 per frame after 60 frames
+| Component | Raw Value | Description |
+|-----------|-----------|-------------|
+| New max distance | +1.0/pixel | First time reaching a new X position |
+| Rightward movement | +0.1/pixel | Any rightward movement (even revisiting) |
+| Backward movement | -0.05/pixel | Moving left |
+| Death | -50.0 | Losing a life |
+| Level complete | +1000.0 | Reaching the flagpole |
 
-## 📊 Training Configuration
+## Training Parameters
 
-### Default Hyperparameters
-```yaml
-learning_rate: 0.00025
-batch_size: 32
-replay_buffer_size: 100000
-epsilon_start: 1.0
-epsilon_end: 0.01
-epsilon_decay: 0.995
-target_update_frequency: 1000
-max_episodes: 50000
-```
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Learning rate | 0.00025 | Adam optimizer |
+| Batch size | 32 | From replay buffer |
+| Replay buffer | 20,000 | Circular buffer |
+| Gamma (discount) | 0.99 | Future reward weight |
+| Epsilon start | 1.0 | Full exploration |
+| Epsilon end | 0.01 | Minimal exploration |
+| Epsilon decay | 0.998/episode | ~1500 episodes to reach 0.05 |
+| Frame skip | 4 | Act every 4 frames |
+| Target update | Polyak tau=0.005 | Soft update every training step |
+| Warmup | 50 episodes | Random actions before learning |
+| Reward clip | [-1, +1] | Q-value stability |
 
-### Curriculum Learning
-1. **World 1-1 Mastery**: Focus on completing first level
-2. **Performance Threshold**: 80% completion rate over 100 episodes
-3. **Progressive Expansion**: Add more levels once mastery achieved
+## Configuration
 
-## 📈 Monitoring and Logging
+Edit [`config/training_config.yaml`](config/training_config.yaml) for:
+- Learning rates, batch sizes, exploration parameters
+- WebSocket host/port settings
+- Frame skip and target update settings
+- Curriculum learning phases
 
-### Real-time Metrics
-- Episode rewards and completion rates
-- Neural network loss and Q-values
-- Frame synchronization quality
-- Memory usage and processing times
+## Troubleshooting
 
-### CSV Logging
-```csv
-episode,step,reward,total_reward,epsilon,loss,mario_x_max,level_completed,death_cause,processing_time,sync_quality
-```
+### WebSocket Connection Failed
+- Make sure Python trainer is running FIRST, then load the Lua script
+- Check that port 8765 is not in use: `netstat -an | findstr 8765`
+- Verify firewall allows localhost connections
 
-### TensorBoard Integration
-```bash
-tensorboard --logdir data/logs/tensorboard
-```
+### No Mario Movement
+- Verify save state slot 10 contains World 1-1 gameplay (not title screen)
+- Check that `mario_x` values are increasing in Python logs
+- Enable debug logging: `python python/main.py train --log-level DEBUG`
 
-## 🔧 Configuration
+### GPU Out of Memory
+- Reduce `replay_buffer_size` in `training_config.yaml` (try 10000)
+- Reduce `batch_size` (try 16)
 
-### Training Parameters
-Edit [`config/training_config.yaml`](config/training_config.yaml) to adjust:
-- Learning rates and batch sizes
-- Exploration parameters
-- Training schedule
-- Optimization settings
+## Documentation
 
-### Network Architecture
-Edit [`config/network_config.yaml`](config/network_config.yaml) to modify:
-- Layer sizes and configurations
-- Dropout rates
-- Activation functions
+See [`FEATURE_TRACKER.md`](FEATURE_TRACKER.md) for the full development roadmap including:
+- Phase 0-2: Bug fixes and training improvements (complete)
+- Phase 3: Reliability improvements
+- Phase 4: Performance optimization
+- Phase 5: Advanced RL techniques
+- Phase 6: Per-level models with auto-progression
 
-### Game Settings
-Edit [`config/game_config.yaml`](config/game_config.yaml) to configure:
-- Memory address mappings
-- Action definitions
-- ROM path settings
+Detailed docs available in [`docs/`](docs/):
+- [Architecture](docs/architecture.md)
+- [Communication Protocol](docs/communication-protocol.md)
+- [Memory Addresses](docs/memory-addresses.md)
+- [Reward System](docs/reward-system.md)
+- [Neural Network](docs/neural-network-architecture.md)
 
-## 🐛 Troubleshooting
+## License
 
-### Common Issues
-
-#### WebSocket Connection Failed
-```bash
-# Check if Python server is running
-netstat -an | grep 8765
-
-# Verify firewall settings
-# Ensure FCEUX has network permissions
-```
-
-#### Frame Desync Detected
-```bash
-# Check logs for sync quality metrics
-tail -f data/logs/debug_logs/debug_*.log
-
-# Adjust sync parameters in config
-```
-
-#### GPU Memory Issues
-```bash
-# Reduce batch size in training_config.yaml
-batch_size: 16  # Instead of 32
-
-# Enable gradient accumulation
-accumulation_steps: 2
-```
-
-#### Poor Training Performance
-```bash
-# Check reward distribution
-python scripts/visualize_training.py
-
-# Adjust reward weights in reward_calculator.py
-# Verify memory address readings
-```
-
-## 📚 Documentation
-
-Comprehensive documentation available in [`docs/`](docs/):
-
-- [**Architecture Overview**](docs/architecture.md): System design and component interaction
-- [**Communication Protocol**](docs/communication-protocol.md): WebSocket message formats
-- [**Memory Addresses**](docs/memory-addresses.md): NES memory mapping reference
-- [**Data Flow**](docs/data-flow.md): End-to-end data processing pipeline
-- [**Frame Synchronization**](docs/frame-synchronization.md): Sync strategy and desync prevention
-- [**Reward System**](docs/reward-system.md): Detailed reward calculation logic
-- [**Neural Network**](docs/neural-network-architecture.md): DQN architecture specifications
-- [**Project Structure**](docs/project-structure-implementation.md): Implementation guide
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- FCEUX development team for excellent NES emulation and Lua support
-- PyTorch team for the deep learning framework
-- Super Mario Bros speedrunning community for game mechanics insights
-- OpenAI and DeepMind for foundational DQN research
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/your-username/Super-Mario-Bot-V3/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/Super-Mario-Bot-V3/discussions)
-- **Documentation**: [Project Wiki](https://github.com/your-username/Super-Mario-Bot-V3/wiki)
-
----
-
-**Note**: This project is for educational and research purposes. Users must provide their own legally obtained ROM files.
+MIT License. Users must provide their own legally obtained ROM files.
