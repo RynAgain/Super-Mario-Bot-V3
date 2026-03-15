@@ -1,2 +1,0 @@
-[console_scripts]
-mario-ai-train = python.main:main

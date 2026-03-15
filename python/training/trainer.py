@@ -807,20 +807,23 @@ class MarioTrainer:
         return action_map.get(action_id, {})
     
     async def _handle_episode_event(self, data: Dict[str, Any]):
-        """Handle episode event from Lua script."""
+        """Handle episode event from Lua script.
+        
+        NOTE: Do NOT call episode_manager.start_episode() here.
+        Episodes are created exclusively by _handle_game_state() when the
+        first game state frame arrives.  This prevents the triple-counting
+        bug where episodes were created by:
+          1. _start_episode() -> sends reset to Lua
+          2. Lua responds with episode_event:started -> this handler
+          3. _handle_game_state() -> no current episode, creates another
+        """
         event = data.get('event')
         episode_id = data.get('episode_id')
         
-        self.logger.info(f"Episode {episode_id} event: {event}")
+        self.logger.info(f"Lua episode {episode_id} event: {event}")
         
-        if event == 'started':
-            # Episode started in Lua
-            initial_state = data.get('game_state', {})
-            self.episode_manager.start_episode(initial_state)
-        elif event == 'ended':
-            # Episode ended in Lua
-            # This will be handled by the main training loop
-            pass
+        # Just log the event -- episode lifecycle is managed by the training loop
+        # and _handle_game_state(), not by Lua events.
     
     async def _handle_frame_advance(self, data: Dict[str, Any]):
         """Handle frame advance notification."""

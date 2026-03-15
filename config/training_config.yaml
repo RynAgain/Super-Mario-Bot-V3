@@ -40,20 +40,20 @@ training:
   noisy_networks: false           # Enable noisy networks for exploration
   
   # Curriculum Learning
+  # NOTE: epsilon_override was removed -- it completely blocked the per-episode
+  # epsilon decay, locking epsilon at 0.8 for the first 10k episodes.
+  # Epsilon is now controlled solely by epsilon_decay (0.998 per episode).
   curriculum:
-    enabled: true
+    enabled: false                  # Disabled until we have a working baseline
     phases:
       - name: "exploration"
         episodes: 10000
-        epsilon_override: 0.8
         reward_scaling: 1.2
-      - name: "optimization" 
+      - name: "optimization"
         episodes: 30000
-        epsilon_override: null
         reward_scaling: 1.0
       - name: "mastery"
         episodes: 10000
-        epsilon_override: 0.05
         reward_scaling: 0.9
 
 # Performance and Resource Management

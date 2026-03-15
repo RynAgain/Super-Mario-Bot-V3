@@ -396,18 +396,20 @@ class CommunicationManager:
         """
         try:
             # Check for frame desynchronization
-            if frame_id != self.last_frame_id + 1:
+            # IMPORTANT: When Lua resets an episode, frame_id goes back to 0.
+            # This is normal behavior, not a desync.
+            if frame_id < self.last_frame_id:
+                # Frame ID went backward -- this is an episode reset
+                self.logger.info(f"Frame ID reset detected: {self.last_frame_id} -> {frame_id} (episode reset)")
+                self.frame_desync_count = 0
+            elif frame_id != self.last_frame_id + 1 and frame_id > 0:
                 self.frame_desync_count += 1
-                self.logger.warning(f"Frame desync detected: expected {self.last_frame_id + 1}, got {frame_id}")
-                
                 if self.frame_desync_count > self.max_desync_tolerance:
-                    self.logger.error(f"Frame desync count exceeded tolerance: {self.frame_desync_count}")
-                    # Don't send error or close connection - just log and reset
+                    self.logger.warning(f"Frame desync: expected {self.last_frame_id + 1}, got {frame_id} (count: {self.frame_desync_count})")
                     self.frame_desync_count = 0
-                    self.last_frame_id = frame_id  # Resync to current frame
             else:
-                self.frame_desync_count = 0  # Reset on successful sync
-            
+                self.frame_desync_count = 0
+
             self.last_frame_id = frame_id
             
             # Parse game state with error tolerance

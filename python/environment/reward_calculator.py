@@ -580,8 +580,9 @@ class RewardCalculator:
         if time_remaining <= 0:
             return True, "timeout"
         
-        # Stuck for too long (optional termination)
-        if self.frames_stuck > 600:  # 10 seconds at 60 FPS
+        # Stuck for too long -- 1800 frames = 30 seconds at 60 FPS.
+        # Mario needs substantial time to discover pipe jumps through exploration.
+        if self.frames_stuck > 1800:
             return True, "stuck_timeout"
         
         return False, ""
