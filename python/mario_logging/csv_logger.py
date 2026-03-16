@@ -149,8 +149,9 @@ class CSVLogger:
     - Step-level decimation for high-frequency logs
     """
     
-    # Maximum CSV file size before writes are silently dropped (bytes)
-    MAX_CSV_FILE_SIZE = 200 * 1024 * 1024  # 200 MB
+    # Maximum CSV file size before writes are silently dropped (bytes).
+    # Kept under 50 MB so files can be committed to GitHub (100 MB hard limit).
+    MAX_CSV_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
     
     def __init__(self, log_directory: str = "logs", session_id: Optional[str] = None,
                  training_log_interval: int = 10):

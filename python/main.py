@@ -45,11 +45,12 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(getattr(logging, log_level.upper()))
     
-    # Rotating file handler: 50 MB per file, keep 3 backups (200 MB max)
+    # Rotating file handler: 25 MB per file, keep 3 backups.
+    # Only the current file is committed to git; backups (.1/.2/.3) are gitignored.
     log_path = log_file or str(log_dir / "mario_ai_training.log")
     file_handler = logging.handlers.RotatingFileHandler(
         log_path,
-        maxBytes=50 * 1024 * 1024,  # 50 MB
+        maxBytes=25 * 1024 * 1024,  # 25 MB
         backupCount=3,
         encoding='utf-8'
     )

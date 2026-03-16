@@ -1,0 +1,49 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+
+# ---------- Virtual environments ----------
+.venv/
+venv/
+env/
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- OS ----------
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---------- Training checkpoints (large binary .pt files) ----------
+checkpoints/*.pt
+
+# ---------- Log rotation backups (only keep the current file) ----------
+logs/*.log.[0-9]*
+logs/*.log.bak
+lua/logs/*.log.[0-9]*
+lua/logs/*.log.bak
+
+# ---------- ROM files (copyrighted) ----------
+*.nes
+
+# ---------- FCEUX save states ----------
+fceux-2.6.6-win64/fcs/
+
+# ---------- TensorBoard logs (regenerated, can be large) ----------
+runs/
+
+# ---------- Large generated data ----------
+*.pkl
+*.h5
+data/

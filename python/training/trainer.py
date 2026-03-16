@@ -16,12 +16,20 @@ import signal
 import time
 import torch
 import numpy as np
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field
 from enum import Enum
 import threading
+
+# TensorBoard -- optional but recommended
+try:
+    from torch.utils.tensorboard import SummaryWriter
+    TENSORBOARD_AVAILABLE = True
+except ImportError:
+    TENSORBOARD_AVAILABLE = False
 
 # Import all required components
 from python.agents.dqn_agent import DQNAgent
@@ -98,6 +106,9 @@ class MarioTrainer:
         self.last_fps_update = time.time()
         self.current_fps = 0.0
         
+        # Action distribution tracking per episode
+        self._episode_action_counts: Counter = Counter()
+        
         # Error throttling -- prevents runaway logging when an error repeats
         self._error_counts: Dict[str, int] = {}   # error_key -> count since last log
         self._error_last_logged: Dict[str, float] = {}  # error_key -> timestamp
@@ -134,6 +145,18 @@ class MarioTrainer:
                 enable_plotting=False,
                 reward_clip=1.0  # Clip rewards to [-1, +1] for Q-value stability
             )
+            
+            # TensorBoard writer -- logs scalars for loss, reward, Q-values, epsilon, actions
+            self.tb_writer: Optional['SummaryWriter'] = None
+            if TENSORBOARD_AVAILABLE:
+                tb_log_dir = Path("runs") / self.session_id
+                self.tb_writer = SummaryWriter(log_dir=str(tb_log_dir))
+                self.logger.info(f"TensorBoard logging enabled -> {tb_log_dir}")
+            else:
+                self.logger.warning(
+                    "TensorBoard not available (pip install tensorboard). "
+                    "Training will proceed without TB logging."
+                )
             
             # Frame skip counter (acts every N frames, repeats last action for skipped frames)
             self._frame_skip_counter = 0
@@ -214,13 +237,15 @@ class MarioTrainer:
     
     def _register_websocket_handlers(self):
         """Register WebSocket message handlers."""
-        # Register binary handler for game state data
-        self.websocket_server.register_binary_handler(self._handle_game_state)
+        # Register binary handler as FALLBACK for legacy binary game state data
+        self.websocket_server.register_binary_handler(self._handle_binary_game_state)
         
         # Register screen frame handler for Lua gui.gdscreenshot() data
         self.websocket_server.register_screen_frame_handler(self._handle_screen_frame)
         
-        # Register JSON handlers for control messages
+        # Register JSON handlers
+        # PRIMARY: game_state now arrives as JSON (eliminates binary parsing bugs)
+        self.websocket_server.register_json_handler('game_state', self._handle_json_game_state)
         self.websocket_server.register_json_handler('episode_event', self._handle_episode_event)
         self.websocket_server.register_json_handler('frame_advance', self._handle_frame_advance)
         self.websocket_server.register_json_handler('error', self._handle_lua_error)
@@ -450,6 +475,7 @@ class MarioTrainer:
         self._frame_skip_counter = 0
         self.frame_times.clear()
         self.processing_times.clear()
+        self._episode_action_counts.clear()
         
         # Update state manager
         self.state_manager.update_episode_start(self.current_episode + 1)
@@ -494,11 +520,38 @@ class MarioTrainer:
                 'min': agent_stats.get('episode_reward_min', 0.0)
             }
             
-            # Get action statistics (simplified)
+            # Get action statistics from actual counts
+            total_actions = sum(self._episode_action_counts.values()) or 1
             action_stats = {
                 'exploration': int(episode_stats.frames_processed * self.agent.epsilon),
                 'exploitation': int(episode_stats.frames_processed * (1 - self.agent.epsilon))
             }
+            
+            # --- TensorBoard episode-level logging ---
+            if self.tb_writer is not None:
+                ep = self.current_episode + 1
+                self.tb_writer.add_scalar("episode/reward", total_reward, ep)
+                self.tb_writer.add_scalar("episode/distance", max_distance, ep)
+                self.tb_writer.add_scalar("episode/duration_s", episode_duration, ep)
+                self.tb_writer.add_scalar("episode/epsilon", self.agent.epsilon, ep)
+                self.tb_writer.add_scalar("episode/steps", episode_stats.frames_processed, ep)
+                
+                # Action distribution histogram -- detect collapsed exploration
+                if self._episode_action_counts:
+                    action_tensor = torch.zeros(12)
+                    for aid, cnt in self._episode_action_counts.items():
+                        if 0 <= aid < 12:
+                            action_tensor[aid] = cnt
+                    self.tb_writer.add_histogram("episode/action_distribution", action_tensor, ep)
+                    
+                    # Scalar: number of unique actions used (low = collapsed)
+                    self.tb_writer.add_scalar(
+                        "episode/unique_actions", len(self._episode_action_counts), ep
+                    )
+                    # Scalar: entropy of action distribution (0 = always same action)
+                    probs = action_tensor / action_tensor.sum().clamp(min=1)
+                    entropy = -(probs * (probs + 1e-8).log()).sum().item()
+                    self.tb_writer.add_scalar("episode/action_entropy", entropy, ep)
             
             self.csv_logger.log_episode_summary(
                 episode=self.current_episode + 1,
@@ -526,22 +579,63 @@ class MarioTrainer:
             f"Duration={episode_duration:.1f}s, Completed={completed}"
         )
     
-    async def _handle_game_state(self, frame_id: int, game_state_data: bytes):
+    async def _handle_json_game_state(self, data: Dict[str, Any]):
         """
-        Handle incoming game state data from Lua script.
+        Handle game state arriving as JSON (preferred protocol).
+        
+        The Lua script now sends game state as a flat JSON object with type="game_state".
+        This eliminates binary struct packing/unpacking bugs entirely.
+        
+        Args:
+            data: Parsed JSON dictionary from Lua
+        """
+        frame_id = data.get('frame_id', 0)
+        # The JSON dict IS the game state -- no binary parsing needed
+        game_state = {
+            'mario_x': data.get('mario_x', 0),
+            'mario_y': data.get('mario_y', 0),
+            'mario_x_vel': data.get('mario_x_vel', 0),
+            'mario_y_vel': data.get('mario_y_vel', 0),
+            'mario_state': data.get('mario_state', 0),
+            'powerup': data.get('powerup', 0),
+            'power_state': data.get('powerup', 0),
+            'lives': data.get('lives', 3),
+            'world': data.get('world', 1),
+            'level': data.get('level', 1),
+            'time': data.get('time', 400),
+            'score': data.get('score', 0),
+            'coins': data.get('coins', 0),
+            'timestamp': data.get('timestamp', time.time()),
+        }
+        await self._process_game_state_dict(frame_id, game_state)
+    
+    async def _handle_binary_game_state(self, frame_id: int, game_state_data: bytes):
+        """
+        Handle binary game state data (legacy fallback).
+        
+        Kept for backward compatibility if Lua sends binary 0x01 packets.
+        New Lua code sends JSON instead.
         
         Args:
             frame_id: Frame identifier
             game_state_data: Binary game state data
+        """
+        game_state = self.frame_capture.parse_game_state(game_state_data)
+        await self._process_game_state_dict(frame_id, game_state)
+    
+    async def _process_game_state_dict(self, frame_id: int, game_state: Dict[str, Any]):
+        """
+        Core game state processing logic shared by JSON and binary handlers.
+        
+        Args:
+            frame_id: Frame identifier
+            game_state: Parsed game state dictionary
         """
         try:
             step_start_time = time.time()
             
             # Track when we last received game state data
             self._last_game_state_received = step_start_time
-            
-            # Parse game state from binary data
-            game_state = self.frame_capture.parse_game_state(game_state_data)
             
             # Episodes are created exclusively by _start_episode().
             # If no episode exists or it's not running, skip this frame.
@@ -619,6 +713,9 @@ class MarioTrainer:
             # Convert action ID to button mapping
             action_buttons = self._action_id_to_buttons(action_id)
             
+            # Track action distribution for this episode
+            self._episode_action_counts[action_id] += 1
+            
             # Cache for frame skipping
             self._last_action_id = action_id
             self._last_action_buttons = action_buttons
@@ -656,6 +753,14 @@ class MarioTrainer:
             training_metrics = {}
             if self.training_phase != TrainingPhase.WARMUP:
                 training_metrics = self.agent.train_step()
+                
+                # TensorBoard step-level logging (every train step that returns data)
+                if training_metrics and self.tb_writer is not None:
+                    gs = self.agent.training_step  # global training step
+                    self.tb_writer.add_scalar("train/loss", training_metrics.get('loss', 0), gs)
+                    self.tb_writer.add_scalar("train/mean_q_value", training_metrics.get('mean_q_value', 0), gs)
+                    self.tb_writer.add_scalar("train/epsilon", training_metrics.get('epsilon', 0), gs)
+                    self.tb_writer.add_scalar("train/learning_rate", self.agent.learning_rate, gs)
             
             # Update state for next step
             self.previous_frames = frames
@@ -1059,6 +1164,11 @@ class MarioTrainer:
             # Close CSV logger
             if self.csv_logger:
                 self.csv_logger.close()
+            
+            # Close TensorBoard writer
+            if self.tb_writer is not None:
+                self.tb_writer.close()
+                self.logger.info("TensorBoard writer closed")
             
             # Export training summary
             if self.state_manager:

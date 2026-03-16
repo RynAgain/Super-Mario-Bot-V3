@@ -39,9 +39,9 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [x] Reward clipping to [-1, +1] for Q-value stability
 - [x] Frame skipping: act every 4 frames, repeat action on skipped frames
 - [x] Soft target updates (Polyak tau=0.005)
-- [ ] Add TensorBoard logging for loss, reward, Q-values, epsilon curves
-- [ ] Log action distribution per episode to detect collapsed exploration
-- [ ] Implement gradient accumulation for larger effective batch sizes
+- [x] Add TensorBoard logging for loss, reward, Q-values, epsilon curves
+- [x] Log action distribution per episode to detect collapsed exploration (histogram + entropy + unique count)
+- [x] Implement gradient accumulation for larger effective batch sizes (default 4x = 128 effective batch)
 
 ---
 
@@ -79,6 +79,8 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [x] Remove `setup.py`, `setup_minimal.py`, `MANIFEST.in`, egg-info
 - [x] Rewrite `README.md` with accurate architecture, action space, parameters
 - [x] Clear stale logs/ (15 CSV files), checkpoints/ (3 files), lua/logs/ (2 files) from failed overnight run
+- [x] Create `.gitignore` (checkpoints/*.pt, rotation backups, ROMs, save states, __pycache__)
+- [x] Add `.gitkeep` to empty `logs/`, `checkpoints/`, `lua/logs/` directories
 
 ---
 
@@ -86,8 +88,8 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 > **Goal:** Training runs for hours without crashes or connection drops.
 
-- [ ] **P0** -- Replace hand-rolled Lua WebSocket with a proper library (e.g. `lua-websockets`)
-- [ ] **P1** -- Switch to JSON-only protocol (drop binary) -- eliminates parsing bugs
+- [x] **P0** -- Replace hand-rolled Lua WebSocket -- N/A: FCEUX Lua 5.1 has no WS library; hand-rolled is only option. Hardened with error throttling instead.
+- [x] **P1** -- Switch to JSON-only protocol (drop binary game state) -- Lua sends `type:"game_state"` JSON, Python handles via `_handle_json_game_state`. Binary fallback kept for backward compat. Screen frames stay binary.
 - [x] **P1** -- Protocol version negotiation: Lua checks `init_ack.protocol_version` and warns on mismatch
 - [ ] **P2** -- Auto-create save state on first run (skipped for now)
 - [x] **P1** -- Rotating log file handler (50 MB x 3 backups = 200 MB cap) in `main.py`

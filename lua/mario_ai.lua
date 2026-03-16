@@ -1499,15 +1499,15 @@ local function send_websocket_message(socket, data, is_binary)
         frame = frame .. pack_u8(mask_key[i])
     end
     
-    -- Mask the payload
-    local masked_data = ""
+    -- Mask the payload using table.concat (O(n) vs O(n^2) string concat)
+    local masked_parts = {}
     for i = 1, payload_len do
         local data_byte = string.byte(data, i)
         local mask_byte = mask_key[((i - 1) % 4) + 1]
-        masked_data = masked_data .. pack_u8(bit_xor(data_byte, mask_byte))
+        masked_parts[i] = string.char(bit_xor(data_byte, mask_byte))
     end
     
-    frame = frame .. masked_data
+    frame = frame .. table.concat(masked_parts)
     
     local result, err = socket:send(frame)
     if not result then
@@ -1743,10 +1743,46 @@ local function send_init_message()
     return send_websocket_message(g_state.websocket, json_data, false)
 end
 
--- Send binary game state
+-- Send game state as JSON text (replaces binary struct encoding).
+-- JSON eliminates struct-packing bugs and makes debugging trivial.
+-- Screen frames still use binary (type 0x02) since they're large pixel data.
 local function send_game_state(game_state)
-    local binary_data = pack_binary_game_state(game_state)
-    return send_websocket_message(g_state.websocket, binary_data, true)
+    local mario = game_state.mario or {}
+    local level = game_state.level or {}
+    local score = game_state.score or {}
+    local threats = game_state.threat_assessment or {}
+
+    -- Flatten to a simple JSON object -- no nested tables
+    local parts = {
+        '"type":"game_state"',
+        '"frame_id":' .. (game_state.frame_id or 0),
+        '"timestamp":' .. now_ms(),
+        '"episode_id":' .. (game_state.episode_id or 0),
+        -- Mario
+        '"mario_x":' .. (mario.x_pos_world or 0),
+        '"mario_y":' .. (mario.y_pos_level or 0),
+        '"mario_x_vel":' .. (mario.x_velocity or 0),
+        '"mario_y_vel":' .. (mario.y_velocity or 0),
+        '"mario_state":' .. (mario.player_state or 0),
+        '"powerup":' .. (mario.power_state or 0),
+        '"lives":' .. (mario.lives or 3),
+        -- Level / Score
+        '"world":' .. (level.world_number or 0),
+        '"level":' .. (level.level_number or 0),
+        '"time":' .. (game_state.time_remaining or 400),
+        '"score":' .. (game_state.total_score or 0),
+        '"coins":' .. (game_state.total_coins or 0),
+        -- Terminal state
+        '"is_dead":' .. (game_state.is_dead and "true" or "false"),
+        '"is_level_complete":' .. (game_state.is_level_complete and "true" or "false"),
+        '"level_progress":' .. string.format("%.4f", game_state.level_progress or 0),
+        -- Threat assessment (optional enrichment)
+        '"threat_count":' .. (threats.threat_count or 0),
+        '"nearest_threat_distance":' .. (threats.nearest_threat_distance or 999)
+    }
+
+    local json_text = "{" .. table.concat(parts, ",") .. "}"
+    return send_websocket_message(g_state.websocket, json_text, false)  -- text, not binary
 end
 
 -- Capture, downsample to 84x84 grayscale, and send screen frame.

@@ -31,8 +31,8 @@ GPUtil>=1.4.0
 # Plotting and Visualization
 matplotlib>=3.5.0
 
-# Optional: TensorBoard (for future training visualization)
-# tensorboard>=2.13.0
+# TensorBoard (training visualization)
+tensorboard>=2.13.0
 
 # Development and Testing (install with: pip install -r requirements.txt[dev])
 # pytest>=7.4.0

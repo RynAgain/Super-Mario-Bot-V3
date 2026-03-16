@@ -63,6 +63,10 @@ class DQNAgent:
         self.target_update_frequency = config.get('target_update_frequency', 1000)
         self.gradient_clipping = config.get('gradient_clipping', 10.0)
         
+        # Gradient accumulation -- effective batch = batch_size * accumulation_steps
+        self.gradient_accumulation_steps = config.get('gradient_accumulation_steps', 1)
+        self._grad_accum_counter = 0
+        
         # Exploration parameters
         self.epsilon = config.get('epsilon_start', 1.0)
         self.epsilon_start = config.get('epsilon_start', 1.0)
@@ -294,10 +298,16 @@ class DQNAgent:
     
     def train_step(self) -> Dict[str, float]:
         """
-        Perform one training step.
+        Perform one training step with optional gradient accumulation.
+        
+        When ``gradient_accumulation_steps`` > 1, gradients are accumulated
+        across multiple mini-batches before the optimizer steps.  This gives
+        an effective batch size of ``batch_size * gradient_accumulation_steps``
+        without increasing GPU memory usage.
         
         Returns:
-            Dictionary containing training metrics
+            Dictionary containing training metrics (empty dict on accumulation
+            sub-steps that don't trigger an optimizer update)
         """
         if not self.replay_buffer.is_ready(self.batch_size):
             return {}
@@ -312,45 +322,58 @@ class DQNAgent:
         (state_frames, state_vectors, actions, rewards,
          next_state_frames, next_state_vectors, dones, weights, indices) = batch
         
-        # Compute loss
+        accum = self.gradient_accumulation_steps
+        
+        # --- Gradient accumulation: zero grads only on first sub-step ---
+        if self._grad_accum_counter == 0:
+            self.optimizer.zero_grad()
+        
+        # Compute loss (scaled by 1/accum so accumulated gradient is correct)
         if self.mixed_precision and self.scaler is not None:
             with torch.cuda.amp.autocast():
                 loss, td_errors = self._compute_loss(
                     state_frames, state_vectors, actions, rewards,
                     next_state_frames, next_state_vectors, dones, weights
                 )
-            
-            # Backward pass with gradient scaling
-            self.optimizer.zero_grad()
-            self.scaler.scale(loss).backward()
-            
-            # Gradient clipping
+            scaled_loss = loss / accum
+            self.scaler.scale(scaled_loss).backward()
+        else:
+            loss, td_errors = self._compute_loss(
+                state_frames, state_vectors, actions, rewards,
+                next_state_frames, next_state_vectors, dones, weights
+            )
+            scaled_loss = loss / accum
+            scaled_loss.backward()
+        
+        self._grad_accum_counter += 1
+        
+        # --- Only step optimizer after accumulating enough sub-steps ---
+        if self._grad_accum_counter < accum:
+            # Update priorities even on sub-steps so PER stays current
+            if self.prioritized_replay:
+                priorities = torch.abs(td_errors) + 1e-6
+                self.replay_buffer.update_priorities(indices, priorities)
+            return {}  # no metrics until optimizer steps
+        
+        # Reset counter for next accumulation window
+        self._grad_accum_counter = 0
+        
+        # Gradient clipping + optimizer step
+        if self.mixed_precision and self.scaler is not None:
             if self.gradient_clipping > 0:
                 self.scaler.unscale_(self.optimizer)
                 torch.nn.utils.clip_grad_norm_(
                     self.q_network.parameters(),
                     self.gradient_clipping
                 )
-            
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
-            loss, td_errors = self._compute_loss(
-                state_frames, state_vectors, actions, rewards,
-                next_state_frames, next_state_vectors, dones, weights
-            )
-            
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
-            
-            # Gradient clipping
             if self.gradient_clipping > 0:
                 torch.nn.utils.clip_grad_norm_(
                     self.q_network.parameters(),
                     self.gradient_clipping
                 )
-            
             self.optimizer.step()
         
         # Update priorities for prioritized replay

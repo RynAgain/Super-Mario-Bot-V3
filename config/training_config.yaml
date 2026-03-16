@@ -33,6 +33,7 @@ training:
   loss_function: "Huber"          # Loss function ("Huber", "MSE")
   gradient_clipping: 10.0         # Gradient clipping threshold
   gamma: 0.99                     # Discount factor
+  gradient_accumulation_steps: 4  # Accumulate grads over N mini-batches (effective batch = 32*4 = 128)
   
   # Advanced Training Options
   double_dqn: true                # Enable Double DQN
