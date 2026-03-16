@@ -294,7 +294,7 @@ class RewardCalculator:
         # SMALL PENALTY: Leftward movement (discourage going backward)
         elif current_x < previous_x:
             leftward_movement = previous_x - current_x
-            components.movement_penalty = -leftward_movement * 0.05  # Small penalty for going backward
+            components.movement_penalty = -leftward_movement * 0.1  # Matches retreading reward so oscillation = net zero
         
         # No reward/penalty for staying in same position (0.0)
         
