@@ -66,6 +66,12 @@ class WebSocketServer:
         self.is_running = False
         self.protocol_version = "1.1"
         
+        # Error throttling -- prevents log flooding on repeated errors
+        self._error_counts: Dict[str, int] = {}
+        self._error_last_logged: Dict[str, float] = {}
+        self._error_throttle_interval = 30.0  # seconds between repeated logs
+        self._error_throttle_burst = 3  # first N logged immediately
+        
         # Enhanced features configuration
         self.enhanced_features = enhanced_features
         self.binary_parser = BinaryPayloadParser(enhanced_features)
@@ -292,8 +298,8 @@ class WebSocketServer:
                 await self._send_error("INVALID_MESSAGE", "Unknown message format")
                 
         except Exception as e:
-            self.logger.error(f"Error processing message: {e}")
-            # Don't send error response for processing errors - just log and continue
+            if self._should_log_error(f"process_msg:{type(e).__name__}"):
+                self.logger.error(f"Error processing message: {e}")
     
     async def _process_json_message(self, message: str):
         """
@@ -319,11 +325,11 @@ class WebSocketServer:
                 await self._send_error("UNKNOWN_MESSAGE_TYPE", f"No handler for {message_type}")
                 
         except json.JSONDecodeError as e:
-            self.logger.warning(f"Invalid JSON received: {e}")
-            # Don't send error response - just log and continue
+            if self._should_log_error("json_decode"):
+                self.logger.warning(f"Invalid JSON received: {e}")
         except Exception as e:
-            self.logger.error(f"Error processing JSON message: {e}")
-            # Don't send error response - just log and continue
+            if self._should_log_error(f"json_msg:{type(e).__name__}"):
+                self.logger.error(f"Error processing JSON message: {e}")
     
     async def _process_binary_message(self, message: bytes):
         """
@@ -462,9 +468,9 @@ class WebSocketServer:
                 self.logger.warning("Received binary data but no handler registered")
                 
         except Exception as e:
-            self.logger.error(f"Unexpected error processing binary message: {e}")
             self.enhanced_stats['validation_errors'] += 1
-            # Don't send error response or close connection - just log and continue
+            if self._should_log_error(f"binary_msg:{type(e).__name__}"):
+                self.logger.error(f"Unexpected error processing binary message: {e}")
     
     def _calculate_checksum(self, data: bytes) -> int:
         """
@@ -755,6 +761,39 @@ class WebSocketServer:
                     
             except Exception as e:
                 self.logger.error(f"Error in ping task: {e}")
+    
+    # Error throttling
+    
+    def _should_log_error(self, error_key: str) -> bool:
+        """
+        Rate-limit repeated error messages to prevent log flooding.
+        
+        First ``_error_throttle_burst`` occurrences log immediately.
+        After that, one log per ``_error_throttle_interval`` seconds.
+        
+        Args:
+            error_key: Unique key identifying the error category
+            
+        Returns:
+            True if this error should be logged now
+        """
+        now = time.time()
+        count = self._error_counts.get(error_key, 0)
+        last_logged = self._error_last_logged.get(error_key, 0.0)
+        
+        self._error_counts[error_key] = count + 1
+        
+        if count < self._error_throttle_burst:
+            self._error_last_logged[error_key] = now
+            self._error_counts[error_key] = 0
+            return True
+        
+        if now - last_logged >= self._error_throttle_interval:
+            self._error_last_logged[error_key] = now
+            self._error_counts[error_key] = 0
+            return True
+        
+        return False
     
     # Utility methods
     

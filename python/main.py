@@ -8,6 +8,7 @@ and monitoring training progress.
 import argparse
 import asyncio
 import logging
+import logging.handlers
 import sys
 import os
 from pathlib import Path
@@ -26,7 +27,8 @@ from python.utils.config_loader import ConfigLoader
 
 def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
     """
-    Setup logging configuration.
+    Setup logging configuration with rotating file handler to prevent
+    unbounded log growth during long training runs.
     
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
@@ -39,14 +41,21 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
     # Configure logging format
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     
-    # Setup handlers
-    handlers = [logging.StreamHandler(sys.stdout)]
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(getattr(logging, log_level.upper()))
     
-    if log_file:
-        handlers.append(logging.FileHandler(log_file))
-    else:
-        # Default log file
-        handlers.append(logging.FileHandler(log_dir / "mario_ai_training.log"))
+    # Rotating file handler: 50 MB per file, keep 3 backups (200 MB max)
+    log_path = log_file or str(log_dir / "mario_ai_training.log")
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=50 * 1024 * 1024,  # 50 MB
+        backupCount=3,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(getattr(logging, log_level.upper()))
+    
+    handlers = [console_handler, file_handler]
     
     # Configure logging
     logging.basicConfig(
@@ -55,7 +64,7 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
         handlers=handlers
     )
     
-    # Set specific logger levels
+    # Set specific logger levels to suppress noisy libraries
     logging.getLogger("websockets").setLevel(logging.WARNING)
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)

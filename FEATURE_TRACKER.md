@@ -78,6 +78,7 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [x] Delete stale validation artifacts
 - [x] Remove `setup.py`, `setup_minimal.py`, `MANIFEST.in`, egg-info
 - [x] Rewrite `README.md` with accurate architecture, action space, parameters
+- [x] Clear stale logs/ (15 CSV files), checkpoints/ (3 files), lua/logs/ (2 files) from failed overnight run
 
 ---
 
@@ -89,6 +90,13 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [ ] **P1** -- Switch to JSON-only protocol (drop binary) -- eliminates parsing bugs
 - [x] **P1** -- Protocol version negotiation: Lua checks `init_ack.protocol_version` and warns on mismatch
 - [ ] **P2** -- Auto-create save state on first run (skipped for now)
+- [x] **P1** -- Rotating log file handler (50 MB x 3 backups = 200 MB cap) in `main.py`
+- [x] **P1** -- Error rate-limiting in `trainer.py`: burst of 3 then 1 log per 30s per error category
+- [x] **P1** -- Error rate-limiting in `websocket_server.py`: same throttle for message processing errors
+- [x] **P2** -- CSV write decimation in `csv_logger.py`: training steps logged every 10th frame
+- [x] **P2** -- CSV file size cap (200 MB per file) -- writes silently dropped when exceeded
+- [x] **P2** -- Sync quality CSV throttled to every 100 steps instead of every frame
+- [x] **P2** -- Tensor shape mismatch errors throttled (were logging every frame)
 
 ---
 

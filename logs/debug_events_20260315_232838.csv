@@ -1,4 +1,0 @@
-timestamp,episode,step,event_type,severity,component,message,mario_x,mario_y,action_taken,game_state,stack_trace
-2026-03-15T23:28:56.192254,1,9,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
-2026-03-15T23:29:26.416190,2,443,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
-2026-03-15T23:29:26.416671,2,443,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,

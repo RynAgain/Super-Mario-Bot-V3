@@ -19,7 +19,7 @@ import numpy as np
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 import threading
 
@@ -97,6 +97,12 @@ class MarioTrainer:
         self.processing_times = []
         self.last_fps_update = time.time()
         self.current_fps = 0.0
+        
+        # Error throttling -- prevents runaway logging when an error repeats
+        self._error_counts: Dict[str, int] = {}   # error_key -> count since last log
+        self._error_last_logged: Dict[str, float] = {}  # error_key -> timestamp
+        self._error_throttle_interval = 30.0  # seconds between repeated error logs
+        self._error_throttle_burst = 3  # log first N occurrences immediately
         
         # Setup logging
         self.logger = logging.getLogger(__name__)
@@ -697,19 +703,20 @@ class MarioTrainer:
                 replay_buffer_size=len(self.agent.replay_buffer)
             )
             
-            # Log sync quality
-            self.csv_logger.log_sync_quality(
-                episode=self.current_episode + 1,
-                step=self.current_step,
-                frame_id=frame_id,
-                sync_delay_ms=processing_time_ms,
-                desync_detected=False,
-                recovery_time_ms=0.0,
-                frame_drops=0,
-                buffer_size=1,
-                lua_timestamp=int(time.time() * 1000),
-                python_timestamp=int(time.time() * 1000)
-            )
+            # Log sync quality -- throttled to every 100 steps to avoid huge CSVs
+            if self.current_step % 100 == 0:
+                self.csv_logger.log_sync_quality(
+                    episode=self.current_episode + 1,
+                    step=self.current_step,
+                    frame_id=frame_id,
+                    sync_delay_ms=processing_time_ms,
+                    desync_detected=False,
+                    recovery_time_ms=0.0,
+                    frame_drops=0,
+                    buffer_size=1,
+                    lua_timestamp=int(time.time() * 1000),
+                    python_timestamp=int(time.time() * 1000)
+                )
             
             self.current_step += 1
             
@@ -720,22 +727,24 @@ class MarioTrainer:
                                f"Mario X={game_state.get('mario_x', 0)}, Action={action_id}")
             
         except Exception as e:
-            self.logger.error(f"Error handling game state: {e}")
-            self.logger.error(f"Exception type: {type(e).__name__}")
-            
-            # Don't re-raise the exception - just continue with next frame
-            # This prevents the exception from bubbling up and triggering cleanup
-            
-            # Log debug event
-            self.csv_logger.log_debug_event(
-                episode=self.current_episode + 1,
-                step=self.current_step,
-                event_type="error",
-                severity="high",
-                component="trainer",
-                message=f"Game state processing error: {str(e)}",
-                exception=e
-            )
+            # Throttled error logging -- prevents flooding logs when an error repeats
+            error_key = f"game_state:{type(e).__name__}"
+            if self._should_log_error(error_key):
+                suppressed = self._error_counts.get(error_key, 0)
+                suffix = f" (suppressed {suppressed} duplicates)" if suppressed > 0 else ""
+                self.logger.error(f"Error handling game state: {e}{suffix}")
+                self.logger.error(f"Exception type: {type(e).__name__}")
+                
+                # Log debug event to CSV only when we actually log
+                self.csv_logger.log_debug_event(
+                    episode=self.current_episode + 1,
+                    step=self.current_step,
+                    event_type="error",
+                    severity="high",
+                    component="trainer",
+                    message=f"Game state processing error: {str(e)}{suffix}",
+                    exception=e
+                )
     
     def _validate_tensor_shapes(self, frames: torch.Tensor, state_vector: torch.Tensor):
         """
@@ -757,22 +766,23 @@ class MarioTrainer:
             actual_channels = frames.shape[0] if len(frames.shape) == 3 else 0
         
         if actual_channels != expected_channels:
-            self.logger.error(f"TENSOR SHAPE MISMATCH DETECTED!")
-            self.logger.error(f"  - Actual frame channels: {actual_channels}")
-            self.logger.error(f"  - Expected channels: {expected_channels}")
-            self.logger.error(f"  - Frame tensor shape: {frames.shape}")
-            self.logger.error(f"  - This will cause runtime errors in the neural network")
-            
-            # Log to CSV for debugging
-            self.csv_logger.log_debug_event(
-                episode=self.current_episode + 1,
-                step=self.current_step,
-                event_type="tensor_shape_mismatch",
-                severity="critical",
-                component="trainer",
-                message=f"Frame tensor shape mismatch: expected {expected_channels} channels, got {actual_channels}",
-                exception=None
-            )
+            # Throttled -- this fires every frame when mismatched, so limit output
+            if self._should_log_error("tensor_shape_mismatch"):
+                suppressed = self._error_counts.get("tensor_shape_mismatch", 0)
+                self.logger.error(
+                    f"TENSOR SHAPE MISMATCH: expected {expected_channels} channels, "
+                    f"got {actual_channels} (shape={frames.shape})"
+                    + (f" [suppressed {suppressed} duplicates]" if suppressed else "")
+                )
+                self.csv_logger.log_debug_event(
+                    episode=self.current_episode + 1,
+                    step=self.current_step,
+                    event_type="tensor_shape_mismatch",
+                    severity="critical",
+                    component="trainer",
+                    message=f"Frame tensor shape mismatch: expected {expected_channels} channels, got {actual_channels}",
+                    exception=None
+                )
         
         # Validate state vector shape
         expected_state_size = 12  # Standard game state vector size
@@ -906,6 +916,41 @@ class MarioTrainer:
                     
                     self.training_state.curriculum_phase = phase_name
                     break
+    
+    def _should_log_error(self, error_key: str) -> bool:
+        """
+        Rate-limit repeated error messages.  Returns True when the error
+        should actually be emitted to logs, False when it should be silently
+        counted.
+        
+        First ``_error_throttle_burst`` occurrences are logged immediately.
+        After that, only one log line per ``_error_throttle_interval`` seconds.
+        
+        Args:
+            error_key: Unique key identifying the error category
+            
+        Returns:
+            True if this error should be logged now
+        """
+        now = time.time()
+        count = self._error_counts.get(error_key, 0)
+        last_logged = self._error_last_logged.get(error_key, 0.0)
+        
+        self._error_counts[error_key] = count + 1
+        
+        # Always log the first few occurrences
+        if count < self._error_throttle_burst:
+            self._error_last_logged[error_key] = now
+            self._error_counts[error_key] = 0  # reset counter after logging
+            return True
+        
+        # After burst, only log every N seconds
+        if now - last_logged >= self._error_throttle_interval:
+            self._error_last_logged[error_key] = now
+            self._error_counts[error_key] = 0  # reset counter after logging
+            return True
+        
+        return False
     
     def _update_fps_tracking(self, step_start_time: float):
         """Update FPS tracking."""

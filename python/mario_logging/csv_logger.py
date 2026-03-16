@@ -138,20 +138,29 @@ class CSVLogger:
     Comprehensive CSV logging system for training analysis.
     
     Manages multiple CSV files for different types of logging data:
-    - Training metrics (every step)
+    - Training metrics (every Nth step -- decimated to control file size)
     - Episode summaries (end of each episode)
     - Performance monitoring (every 100 steps)
-    - Synchronization quality (every frame)
-    - Debug events (as they occur)
+    - Synchronization quality (on demand, caller controls frequency)
+    - Debug events (as they occur, throttled by caller)
+    
+    Safety features:
+    - Per-file size cap (default 200 MB) to prevent unbounded growth
+    - Step-level decimation for high-frequency logs
     """
     
-    def __init__(self, log_directory: str = "logs", session_id: Optional[str] = None):
+    # Maximum CSV file size before writes are silently dropped (bytes)
+    MAX_CSV_FILE_SIZE = 200 * 1024 * 1024  # 200 MB
+    
+    def __init__(self, log_directory: str = "logs", session_id: Optional[str] = None,
+                 training_log_interval: int = 10):
         """
         Initialize CSV logger.
         
         Args:
             log_directory: Directory for log files
             session_id: Optional session identifier for file naming
+            training_log_interval: Only write training step data every N steps
         """
         self.log_directory = Path(log_directory)
         self.log_directory.mkdir(parents=True, exist_ok=True)
@@ -170,6 +179,15 @@ class CSVLogger:
         
         # Thread safety
         self.lock = Lock()
+        
+        # Decimation -- only write training step data every N steps
+        self.training_log_interval = max(1, training_log_interval)
+        self._training_write_count = 0
+        
+        # File size tracking -- checked periodically, not every write
+        self._file_size_check_interval = 500  # check every 500 writes
+        self._write_counter = 0
+        self._files_over_limit: set = set()  # paths that have exceeded MAX_CSV_FILE_SIZE
         
         # Performance monitoring
         self.last_performance_log = 0
@@ -242,7 +260,7 @@ class CSVLogger:
             writer = csv.writer(f)
             writer.writerow(headers)
     
-    def log_training_step(self, 
+    def log_training_step(self,
                          episode: int,
                          step: int,
                          reward: float,
@@ -258,6 +276,9 @@ class CSVLogger:
         """
         Log training step data.
         
+        Decimated: only writes every ``training_log_interval`` calls to prevent
+        multi-GB CSV files during long training runs.
+        
         Args:
             episode: Current episode number
             step: Current step number
@@ -272,6 +293,15 @@ class CSVLogger:
             learning_rate: Current learning rate
             replay_buffer_size: Current buffer size
         """
+        # Decimation: skip most steps to keep file size manageable
+        self._training_write_count += 1
+        if self._training_write_count % self.training_log_interval != 0:
+            # Still log performance metrics on their own schedule
+            if step - self.last_performance_log >= self.performance_log_interval:
+                self.log_performance_metrics(episode, step)
+                self.last_performance_log = step
+            return
+        
         entry = TrainingLogEntry(
             timestamp=datetime.now().isoformat(),
             episode=episode,
@@ -518,18 +548,39 @@ class CSVLogger:
         
         self._write_entry(self.debug_log_path, entry)
     
-    def _write_entry(self, file_path: Path, entry: Union[TrainingLogEntry, EpisodeLogEntry, 
-                                                        PerformanceLogEntry, SyncQualityLogEntry, 
+    def _write_entry(self, file_path: Path, entry: Union[TrainingLogEntry, EpisodeLogEntry,
+                                                        PerformanceLogEntry, SyncQualityLogEntry,
                                                         DebugEventLogEntry]):
         """
         Write entry to CSV file.
+        
+        Silently drops writes once a file exceeds MAX_CSV_FILE_SIZE.
         
         Args:
             file_path: Path to CSV file
             entry: Data entry to write
         """
+        # Fast-path: skip files already known to be over the limit
+        if str(file_path) in self._files_over_limit:
+            return
+        
         with self.lock:
             try:
+                # Periodic file size check
+                self._write_counter += 1
+                if self._write_counter % self._file_size_check_interval == 0:
+                    try:
+                        size = file_path.stat().st_size
+                        if size > self.MAX_CSV_FILE_SIZE:
+                            self._files_over_limit.add(str(file_path))
+                            self.logger.warning(
+                                f"CSV file {file_path.name} exceeded {self.MAX_CSV_FILE_SIZE // (1024*1024)} MB "
+                                f"({size // (1024*1024)} MB). Further writes suppressed."
+                            )
+                            return
+                    except OSError:
+                        pass  # file may not exist yet
+                
                 with open(file_path, 'a', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     if hasattr(entry, '__dict__'):

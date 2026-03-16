@@ -1,3 +1,0 @@
-timestamp,episode,duration_seconds,total_steps,total_reward,mario_x_final,mario_x_max,level_completed,death_cause,lives_remaining,score,coins_collected,enemies_killed,powerups_collected,time_remaining,completion_percentage,average_reward_per_step,max_q_value,min_q_value,exploration_actions,exploitation_actions
-1,2026-03-15T23:28:55.533273,1773635335.5332725,1773635366.3675492,30.83427667617798,67,2.11489898989899,False,0,0,,32.99999999999999,0.01793478260869565,6.7,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0,0,0,0,0,1840,0,59.67384996002036,1.0,terminated,stuck_timeout,exploration
-2026-03-15T23:29:26.377570,1,29.66355609893799,1840,26.29999999999999,67,67,False,stuck_timeout,0,0,0,0,0,0,2.11489898989899,0.01429347826086956,26.29999999999999,26.29999999999999,1836,3
