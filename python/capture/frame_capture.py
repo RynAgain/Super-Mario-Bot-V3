@@ -267,63 +267,48 @@ class GameFramePreprocessor:
         return stacked_frames
 
 
-def decode_gd_screenshot(gd_data: bytes, target_size: Tuple[int, int] = (84, 84)) -> Optional[np.ndarray]:
+def decode_lua_screen_frame(data: bytes, target_size: Tuple[int, int] = (84, 84)) -> Optional[np.ndarray]:
     """
-    Decode FCEUX gui.gdscreenshot() GD-format image to grayscale numpy array.
+    Decode compact screen frame from Lua's downsampled gui.gdscreenshot().
     
-    FCEUX's GD truecolor format:
-      Bytes 0-1:   0xFF 0xFE (truecolor signature)
-      Bytes 2-3:   width  (big-endian uint16)
-      Bytes 4-5:   height (big-endian uint16)
-      Byte  6:     transparent flag
-      Bytes 7-10:  transparent color (4 bytes)
-      Bytes 11+:   pixel data, row-major, 4 bytes per pixel (ARGB, big-endian)
+    Lua sends the frame already downsampled to 84x84 grayscale:
+      Byte 0:     width  (84)
+      Byte 1:     height (84)
+      Bytes 2+:   width*height raw grayscale bytes (row-major, 0-255)
     
-    NES resolution: 256x240 = 61440 pixels * 4 = 245760 bytes + 11 header = 245771 total
+    Total: 2 + 84*84 = 7058 bytes (vs ~245KB for raw GD format)
     
     Args:
-        gd_data: Raw GD format bytes from gui.gdscreenshot()
-        target_size: Output size (width, height) for resize
+        data: Compact frame bytes (header already stripped by WebSocket handler)
+        target_size: Expected size (used for validation only)
         
     Returns:
-        Grayscale numpy array of target_size, or None on error
+        Grayscale numpy array (height, width) normalized to [0, 1], or None on error
     """
     try:
-        if len(gd_data) < 11:
+        if len(data) < 2:
             return None
         
-        # Parse header
-        sig = (gd_data[0] << 8) | gd_data[1]
-        width = (gd_data[2] << 8) | gd_data[3]
-        height = (gd_data[4] << 8) | gd_data[5]
+        width = data[0]
+        height = data[1]
         
-        # Validate
-        if width <= 0 or height <= 0 or width > 512 or height > 512:
+        if width <= 0 or height <= 0 or width > 256 or height > 256:
             return None
         
-        expected_size = 11 + (width * height * 4)
-        if len(gd_data) < expected_size:
+        expected_size = 2 + (width * height)
+        if len(data) < expected_size:
             return None
         
-        # Extract pixel data (skip 11-byte header)
-        pixel_data = gd_data[11:11 + width * height * 4]
+        # Extract raw grayscale pixels
+        pixel_data = data[2:2 + width * height]
+        gray = np.frombuffer(pixel_data, dtype=np.uint8).reshape(height, width)
         
-        # Parse ARGB pixels into numpy array
-        # Each pixel: 4 bytes = A, R, G, B (big-endian order from GD)
-        raw = np.frombuffer(pixel_data, dtype=np.uint8).reshape(height, width, 4)
-        
-        # Extract RGB channels (skip alpha at index 0)
-        # GD format is ARGB, so: raw[:,:,0]=A, raw[:,:,1]=R, raw[:,:,2]=G, raw[:,:,3]=B
-        rgb = raw[:, :, 1:4]  # R, G, B
-        
-        # Convert to grayscale using standard luminance weights
-        gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        
-        # Resize to target
-        resized = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
+        # Resize if dimensions don't match target (shouldn't normally happen)
+        if (width, height) != target_size:
+            gray = cv2.resize(gray, target_size, interpolation=cv2.INTER_AREA)
         
         # Normalize to [0, 1]
-        normalized = resized.astype(np.float32) / 255.0
+        normalized = gray.astype(np.float32) / 255.0
         
         return normalized
         
@@ -411,7 +396,7 @@ class FrameCapture:
         Args:
             gd_data: Raw GD format image bytes
         """
-        frame = decode_gd_screenshot(gd_data, self.target_size)
+        frame = decode_lua_screen_frame(gd_data, self.target_size)
         if frame is not None:
             # Add channel dimension: (84, 84) -> (84, 84, 1)
             processed = np.expand_dims(frame, axis=-1)

@@ -88,7 +88,7 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [ ] **P0** -- Replace hand-rolled Lua WebSocket with a proper library (e.g. `lua-websockets`)
 - [ ] **P1** -- Switch to JSON-only protocol (drop binary) -- eliminates parsing bugs
 - [x] **P1** -- Protocol version negotiation: Lua checks `init_ack.protocol_version` and warns on mismatch
-- [x] **P2** -- Auto-create save state: if slot 10 is empty, auto-save current state on first run
+- [ ] **P2** -- Auto-create save state on first run (skipped for now)
 
 ---
 
@@ -97,7 +97,8 @@ to actually learn. Work top-down -- each section builds on the one above it.
 > **Goal:** Train 10x faster to iterate on reward design.
 
 - [x] **P1** -- N-step returns (n=3): buffer N transitions, compute discounted return, bootstrap with gamma^n
-- [ ] **P1** -- Run multiple FCEUX instances in parallel
+- [ ] **P1** -- Run multiple FCEUX instances in parallel (not possible
+)
 - [x] **P2** -- Prioritized experience replay enabled (`prioritized_replay: true`)
 - [ ] **P2** -- Try Noisy Networks as alternative to epsilon-greedy
 - [ ] **P2** -- Experiment with Rainbow DQN

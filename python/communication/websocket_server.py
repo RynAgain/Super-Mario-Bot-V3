@@ -216,7 +216,7 @@ class WebSocketServer:
                 handler_wrapper,
                 self.host,
                 self.port,
-                max_size=524288,  # 512KB buffer (GD screenshots are ~240KB)
+                max_size=65536,  # 64KB buffer (downsampled screenshots are ~7KB)
                 max_queue=1,     # Back-pressure: limit queued messages
                 compression=None,  # Disable compression for latency
                 ping_interval=None,  # DISABLED - Lua client can't respond to WS pings

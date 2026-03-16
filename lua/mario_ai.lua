@@ -1749,36 +1749,93 @@ local function send_game_state(game_state)
     return send_websocket_message(g_state.websocket, binary_data, true)
 end
 
--- Capture and send screen frame via gui.gdscreenshot()
--- The GD format string is sent as binary message type 0x02
--- Only called every N frames to limit bandwidth (~240KB per screenshot)
-local g_screen_capture_interval = 4  -- Capture every 4 frames (matches Python frame_skip)
+-- Capture, downsample to 84x84 grayscale, and send screen frame.
+--
+-- FCEUX's gui.gdscreenshot() returns a GD truecolor image (256x240, ~245KB).
+-- Sending that raw is too slow (Lua XOR masking 245K bytes kills FPS).
+-- Instead we downsample to 84x84 grayscale in Lua and send only ~7KB.
+--
+-- Compact format sent over WebSocket:
+--   Byte 0:     0x02 (message type = screen frame)
+--   Bytes 1-4:  frame_id (uint32 LE)
+--   Byte 5:     width  (84)
+--   Byte 6:     height (84)
+--   Bytes 7+:   84*84 = 7056 raw grayscale bytes (row-major, 0-255)
+--
+-- Total: 7063 bytes (vs ~245,000 before = 35x smaller)
+
+local g_screen_capture_interval = 4  -- Capture every 4 frames (matches frame_skip)
 local g_screen_capture_counter = 0
+
+-- Target dimensions for downsampled frame
+local FRAME_W = 84
+local FRAME_H = 84
+
+-- Source NES dimensions
+local NES_W = 256
+local NES_H = 240
 
 local function send_screen_frame()
     if not g_state.websocket then return false end
     if not gui or not gui.gdscreenshot then
-        -- gui.gdscreenshot not available in this FCEUX build
         return false
     end
     
-    -- Only capture every N frames to limit bandwidth
+    -- Only capture every N frames
     g_screen_capture_counter = g_screen_capture_counter + 1
     if g_screen_capture_counter < g_screen_capture_interval then
-        return true  -- Skip this frame, not an error
+        return true
     end
     g_screen_capture_counter = 0
     
-    -- Capture screen pixels directly from emulator (no window capture needed)
+    -- Capture full-res screen from emulator
     local ok, gd_data = pcall(gui.gdscreenshot)
-    if not ok or not gd_data then
-        debug_log("gui.gdscreenshot() failed", "WARN")
+    if not ok or not gd_data or #gd_data < 11 then
         return false
     end
     
-    -- Build binary packet: 1-byte type (0x02) + 4-byte frame_id + GD image data
-    local header = pack_u8(0x02) .. pack_u32_le(g_state.frame_id)
-    local packet = header .. gd_data
+    -- Parse GD header: 2-byte sig + 2-byte width + 2-byte height + 1-byte transparent + 4-byte color
+    local src_w = string.byte(gd_data, 3) * 256 + string.byte(gd_data, 4)
+    local src_h = string.byte(gd_data, 5) * 256 + string.byte(gd_data, 6)
+    
+    if src_w <= 0 or src_h <= 0 then return false end
+    
+    -- Downsample src_w x src_h -> 84 x 84 grayscale using nearest-neighbor sampling
+    -- (Area averaging would be better but too slow in Lua 5.1 without JIT)
+    local pixels = {}
+    local pixel_offset = 12  -- GD header is 11 bytes, pixel data starts at byte 12 (1-indexed)
+    
+    -- Precompute source row/col for each target pixel
+    local x_ratio = src_w / FRAME_W
+    local y_ratio = src_h / FRAME_H
+    
+    for ty = 0, FRAME_H - 1 do
+        local sy = math.floor(ty * y_ratio)
+        local src_row_start = pixel_offset + (sy * src_w * 4)
+        
+        for tx = 0, FRAME_W - 1 do
+            local sx = math.floor(tx * x_ratio)
+            local src_idx = src_row_start + (sx * 4)
+            
+            -- GD truecolor: 4 bytes per pixel = A, R, G, B
+            -- Convert to grayscale: gray = 0.299*R + 0.587*G + 0.114*B
+            -- Use integer approximation: gray = (77*R + 150*G + 29*B) >> 8
+            local r = string.byte(gd_data, src_idx + 1) or 0  -- +1 for R (skip A)
+            local g = string.byte(gd_data, src_idx + 2) or 0  -- +2 for G
+            local b = string.byte(gd_data, src_idx + 3) or 0  -- +3 for B
+            
+            local gray = math.floor((77 * r + 150 * g + 29 * b) / 256)
+            pixels[#pixels + 1] = string.char(gray)
+        end
+    end
+    
+    -- Build compact packet
+    local header = pack_u8(0x02)
+                .. pack_u32_le(g_state.frame_id)
+                .. pack_u8(FRAME_W)
+                .. pack_u8(FRAME_H)
+    
+    local packet = header .. table.concat(pixels)
     
     return send_websocket_message(g_state.websocket, packet, true)
 end
