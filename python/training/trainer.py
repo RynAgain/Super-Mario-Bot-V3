@@ -406,7 +406,11 @@ class MarioTrainer:
             self.should_stop = True
     
     async def _start_episode(self):
-        """Start a new training episode."""
+        """Start a new training episode.
+        
+        This is the ONLY place that creates episodes in the episode_manager.
+        _handle_game_state no longer auto-creates episodes.
+        """
         self.logger.info(f"Starting episode {self.current_episode + 1}")
         
         # Update training phase based on episode count
@@ -420,14 +424,24 @@ class MarioTrainer:
         )
         
         if reset_sent:
-            # Give Lua script time to process the reset command
-            await asyncio.sleep(0.5)  # 500ms delay to allow reset processing
-            self.logger.debug(f"Reset command sent successfully for episode {self.current_episode + 1}")
+            await asyncio.sleep(0.5)
+            self.logger.debug(f"Reset command sent for episode {self.current_episode + 1}")
         else:
-            self.logger.error(f"Failed to send reset command for episode {self.current_episode + 1}")
+            self.logger.error(f"Failed to send reset for episode {self.current_episode + 1}")
+        
+        # Create episode in episode manager (single source of truth)
+        initial_state = {
+            'mario_x': 40,   # World 1-1 start position
+            'mario_y': 176,
+            'score': 0,
+            'lives': 3,
+            'time': 400
+        }
+        self.episode_manager.start_episode(initial_state)
         
         # Reset episode-specific state
         self.current_step = 0
+        self._frame_skip_counter = 0
         self.frame_times.clear()
         self.processing_times.clear()
         
@@ -523,20 +537,13 @@ class MarioTrainer:
             # Parse game state from binary data
             game_state = self.frame_capture.parse_game_state(game_state_data)
             
-            # Ensure episode is started (but don't create multiple episodes rapidly)
+            # Episodes are created exclusively by _start_episode().
+            # If no episode exists or it's not running, skip this frame.
             if not self.episode_manager.current_episode:
-                self.logger.info("Starting new episode from game state handler")
-                initial_state = {
-                    'mario_x': game_state.get('mario_x', 0),
-                    'mario_y': game_state.get('mario_y', 0),
-                    'score': game_state.get('score', 0),
-                    'lives': game_state.get('lives', 3),
-                    'time': game_state.get('time', 400)
-                }
-                self.episode_manager.start_episode(initial_state)
+                self.logger.debug("No active episode, skipping frame (waiting for _start_episode)")
+                return
             elif self.episode_manager.current_episode.status.value != "running":
-                # Episode has ended, don't process more frames until next episode starts
-                self.logger.debug(f"Skipping frame processing - episode status: {self.episode_manager.current_episode.status.value}")
+                self.logger.debug(f"Episode not running (status={self.episode_manager.current_episode.status.value}), skipping frame")
                 return
             
             # Process frame in episode manager
