@@ -97,11 +97,10 @@ to actually learn. Work top-down -- each section builds on the one above it.
 > **Goal:** Train 10x faster to iterate on reward design.
 
 - [x] **P1** -- N-step returns (n=3): buffer N transitions, compute discounted return, bootstrap with gamma^n
-- [ ] **P1** -- Run multiple FCEUX instances in parallel (not possible
-)
+- [ ] **P1** -- Run multiple FCEUX instances in parallel (not possible, too resource intense.)
 - [x] **P2** -- Prioritized experience replay enabled (`prioritized_replay: true`)
-- [ ] **P2** -- Try Noisy Networks as alternative to epsilon-greedy
-- [ ] **P2** -- Experiment with Rainbow DQN
+- [x] **P2** -- NoisyNet: factorized Gaussian noise in FC layers, replaces epsilon-greedy, self-annealing
+- [x] **P2** -- Rainbow DQN: 5/6 components done (Double + Dueling + PER + N-step + NoisyNet). Missing: C51
 
 ---
 

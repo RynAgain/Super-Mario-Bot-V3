@@ -12,11 +12,79 @@ Architecture:
 - GPU acceleration support
 """
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from typing import Tuple, Optional
+
+
+class NoisyLinear(nn.Module):
+    """
+    Factorized Noisy Linear layer (Fortunato et al., 2018).
+    
+    Replaces nn.Linear with learnable noise parameters. The noise provides
+    state-dependent exploration that self-anneals as the network becomes
+    confident about action values.
+    
+    y = (mu_w + sigma_w * eps_w) @ x + (mu_b + sigma_b * eps_b)
+    
+    Uses factorized Gaussian noise for efficiency:
+      eps_w = f(eps_i) * f(eps_j)^T  where f(x) = sign(x) * sqrt(|x|)
+    """
+    
+    def __init__(self, in_features: int, out_features: int, sigma_init: float = 0.5):
+        super().__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.sigma_init = sigma_init
+        
+        # Learnable parameters
+        self.mu_weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.sigma_weight = nn.Parameter(torch.empty(out_features, in_features))
+        self.mu_bias = nn.Parameter(torch.empty(out_features))
+        self.sigma_bias = nn.Parameter(torch.empty(out_features))
+        
+        # Factorized noise buffers (not parameters, regenerated each forward pass)
+        self.register_buffer('eps_i', torch.zeros(1, in_features))
+        self.register_buffer('eps_j', torch.zeros(out_features, 1))
+        
+        self.reset_parameters()
+        self.reset_noise()
+    
+    def reset_parameters(self):
+        """Initialize mu and sigma parameters."""
+        mu_range = 1.0 / math.sqrt(self.in_features)
+        self.mu_weight.data.uniform_(-mu_range, mu_range)
+        self.mu_bias.data.uniform_(-mu_range, mu_range)
+        self.sigma_weight.data.fill_(self.sigma_init / math.sqrt(self.in_features))
+        self.sigma_bias.data.fill_(self.sigma_init / math.sqrt(self.out_features))
+    
+    @staticmethod
+    def _f_noise(x: torch.Tensor) -> torch.Tensor:
+        """Factorized noise function: f(x) = sign(x) * sqrt(|x|)"""
+        return x.sign() * x.abs().sqrt()
+    
+    def reset_noise(self):
+        """Sample new factorized noise."""
+        eps_i = self._f_noise(torch.randn(1, self.in_features, device=self.mu_weight.device))
+        eps_j = self._f_noise(torch.randn(self.out_features, 1, device=self.mu_weight.device))
+        self.eps_i.copy_(eps_i)
+        self.eps_j.copy_(eps_j)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.training:
+            # Noisy forward: use mu + sigma * noise
+            weight_noise = self.eps_j * self.eps_i  # outer product (out, in)
+            bias_noise = self.eps_j.squeeze(1)       # (out,)
+            weight = self.mu_weight + self.sigma_weight * weight_noise
+            bias = self.mu_bias + self.sigma_bias * bias_noise
+        else:
+            # Deterministic forward: use mu only (no noise during evaluation)
+            weight = self.mu_weight
+            bias = self.mu_bias
+        return F.linear(x, weight, bias)
 
 
 class DuelingDQN(nn.Module):
@@ -33,7 +101,9 @@ class DuelingDQN(nn.Module):
         num_actions: int = 12,
         state_vector_size: int = 12,
         frame_stack_size: int = 4,
-        frame_size: Tuple[int, int] = (84, 84)
+        frame_size: Tuple[int, int] = (84, 84),
+        noisy: bool = False,
+        sigma_init: float = 0.5
     ):
         """
         Initialize the Dueling DQN model.
@@ -43,6 +113,8 @@ class DuelingDQN(nn.Module):
             state_vector_size: Size of game state vector (12 features)
             frame_stack_size: Number of frames to stack (4 frames)
             frame_size: Frame dimensions (height, width) = (84, 84)
+            noisy: Use NoisyLinear for exploration (replaces epsilon-greedy)
+            sigma_init: Initial noise magnitude for NoisyLinear
         """
         super(DuelingDQN, self).__init__()
         
@@ -50,10 +122,15 @@ class DuelingDQN(nn.Module):
         self.state_vector_size = state_vector_size
         self.frame_stack_size = frame_stack_size
         self.frame_size = frame_size
+        self.noisy = noisy
         
-        # Convolutional layers for frame processing
+        # Select linear layer type
+        LinearLayer = NoisyLinear if noisy else nn.Linear
+        linear_kwargs = {'sigma_init': sigma_init} if noisy else {}
+        
+        # Convolutional layers for frame processing (always standard -- no noise needed here)
         self.conv1 = nn.Conv2d(
-            in_channels=frame_stack_size,  # 4 stacked frames
+            in_channels=frame_stack_size,
             out_channels=32,
             kernel_size=8,
             stride=4,
@@ -79,22 +156,23 @@ class DuelingDQN(nn.Module):
         # Calculate convolutional output size
         self.conv_output_size = self._calculate_conv_output_size()
         
-        # Feature fusion layer
-        self.fusion_fc = nn.Linear(
+        # Feature fusion layer (noisy if enabled)
+        self.fusion_fc = LinearLayer(
             self.conv_output_size + state_vector_size,
-            512
+            512,
+            **linear_kwargs
         )
         
-        # Value stream (estimates state value)
-        self.value_fc1 = nn.Linear(512, 256)
-        self.value_fc2 = nn.Linear(256, 1)
+        # Value stream (noisy if enabled)
+        self.value_fc1 = LinearLayer(512, 256, **linear_kwargs)
+        self.value_fc2 = LinearLayer(256, 1, **linear_kwargs)
         
-        # Advantage stream (estimates action advantages)
-        self.advantage_fc1 = nn.Linear(512, 256)
-        self.advantage_fc2 = nn.Linear(256, num_actions)
+        # Advantage stream (noisy if enabled)
+        self.advantage_fc1 = LinearLayer(512, 256, **linear_kwargs)
+        self.advantage_fc2 = LinearLayer(256, num_actions, **linear_kwargs)
         
-        # Dropout for regularization
-        self.dropout = nn.Dropout(0.3)
+        # Dropout for regularization (reduced with noisy nets since noise acts as regularizer)
+        self.dropout = nn.Dropout(0.1 if noisy else 0.3)
         
         # Initialize weights
         self._initialize_weights()
@@ -174,6 +252,14 @@ class DuelingDQN(nn.Module):
         
         return q_values
     
+    def reset_noise(self):
+        """Reset noise in all NoisyLinear layers. Call before each forward pass during training."""
+        if not self.noisy:
+            return
+        for module in self.modules():
+            if isinstance(module, NoisyLinear):
+                module.reset_noise()
+    
     def get_action(
         self,
         frames: torch.Tensor,
@@ -226,6 +312,8 @@ class DuelingDQNConfig:
         self.state_vector_size = 12
         self.frame_stack_size = 4
         self.frame_size = (84, 84)
+        self.noisy = True              # Enable NoisyNet for exploration
+        self.sigma_init = 0.5          # Initial noise magnitude
         
         # Convolutional layers
         self.conv_layers = [
@@ -266,7 +354,9 @@ def create_dueling_dqn(config: Optional[DuelingDQNConfig] = None) -> DuelingDQN:
         num_actions=config.num_actions,
         state_vector_size=config.state_vector_size,
         frame_stack_size=config.frame_stack_size,
-        frame_size=config.frame_size
+        frame_size=config.frame_size,
+        noisy=getattr(config, 'noisy', True),
+        sigma_init=getattr(config, 'sigma_init', 0.5)
     )
     
     return model

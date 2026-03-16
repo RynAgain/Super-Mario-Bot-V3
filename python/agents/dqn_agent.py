@@ -186,7 +186,10 @@ class DQNAgent:
         training: bool = True
     ) -> int:
         """
-        Select action using epsilon-greedy policy.
+        Select action using epsilon-greedy OR NoisyNet exploration.
+        
+        With NoisyNet enabled, epsilon-greedy is bypassed -- the noise in
+        the network weights provides state-dependent exploration automatically.
         
         Args:
             frames: Stacked frames tensor (1, 4, 84, 84)
@@ -196,12 +199,17 @@ class DQNAgent:
         Returns:
             Selected action index
         """
-        if training and np.random.random() < self.epsilon:
-            # Random action (exploration)
+        # NoisyNet: exploration comes from network noise, not epsilon
+        use_noisy = getattr(self.q_network, 'noisy', False)
+        
+        if not use_noisy and training and np.random.random() < self.epsilon:
+            # Epsilon-greedy random action (only when NoisyNet is disabled)
             return np.random.randint(0, 12)
         else:
-            # Greedy action (exploitation)
             with torch.no_grad():
+                # Reset noise before each forward pass for fresh exploration
+                if use_noisy and training:
+                    self.q_network.reset_noise()
                 q_values = self.q_network(frames, state_vector)
                 return q_values.argmax(dim=1).item()
     
@@ -293,6 +301,11 @@ class DQNAgent:
         """
         if not self.replay_buffer.is_ready(self.batch_size):
             return {}
+        
+        # Reset noise for training forward pass (NoisyNet)
+        if getattr(self.q_network, 'noisy', False):
+            self.q_network.reset_noise()
+            self.target_network.reset_noise()
         
         # Sample batch from replay buffer
         batch = self.replay_buffer.sample(self.batch_size)

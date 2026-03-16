@@ -38,7 +38,7 @@ training:
   double_dqn: true                # Enable Double DQN
   prioritized_replay: true        # Enable prioritized experience replay (was false)
   n_step: 3                       # N-step returns for faster value propagation
-  noisy_networks: false           # Enable noisy networks for exploration
+  noisy_networks: true            # NoisyNet: state-dependent exploration (replaces epsilon-greedy)
   
   # Curriculum Learning
   # NOTE: epsilon_override was removed -- it completely blocked the per-episode
