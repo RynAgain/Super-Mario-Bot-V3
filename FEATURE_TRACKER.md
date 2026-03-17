@@ -51,6 +51,8 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [x] Increase `stuck_timeout` from 600 to 1800 frames (30s -- Mario needs time for pipe jumps)
 - [x] Fix frame desync at episode boundaries (Lua resets frame_id to 0, now detected as normal)
 - [x] Fix episode triple-counting (trainer, Lua event, and game state handler all created episodes)
+- [x] Fix false death on episode start: initial `lives=3` vs SMB `lives=2` (displayed-1) triggered -50 penalty every first frame
+- [x] Fix NoisyNet warmup directional lock: force uniform random actions during warmup episodes
 
 ---
 
@@ -110,7 +112,7 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [ ] **P1** -- Run multiple FCEUX instances in parallel (not possible, too resource intense.)
 - [x] **P2** -- Prioritized experience replay enabled (`prioritized_replay: true`)
 - [x] **P2** -- NoisyNet: factorized Gaussian noise in FC layers, replaces epsilon-greedy, self-annealing
-- [x] **P2** -- Rainbow DQN: 5/6 components done (Double + Dueling + PER + N-step + NoisyNet). Missing: C51
+- [x] **P2** -- Rainbow DQN: 6/6 components complete (Double + Dueling + PER + N-step + NoisyNet + C51)
 
 ---
 

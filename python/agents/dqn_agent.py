@@ -202,7 +202,8 @@ class DQNAgent:
         self,
         frames: torch.Tensor,
         state_vector: torch.Tensor,
-        training: bool = True
+        training: bool = True,
+        force_random: bool = False
     ) -> int:
         """
         Select action using epsilon-greedy OR NoisyNet exploration.
@@ -214,10 +215,18 @@ class DQNAgent:
             frames: Stacked frames tensor (1, 4, 84, 84)
             state_vector: Game state vector (1, 12)
             training: Whether in training mode
+            force_random: Force uniform random action (used during warmup to
+                         ensure diverse replay buffer filling, since NoisyNet
+                         initialization bias can cause directional lock)
             
         Returns:
             Selected action index
         """
+        # During warmup, use uniform random to fill replay buffer with diverse data.
+        # NoisyNet's random init can bias toward one direction before training starts.
+        if force_random:
+            return np.random.randint(0, 12)
+        
         # NoisyNet: exploration comes from network noise, not epsilon
         use_noisy = getattr(self.q_network, 'noisy', False)
         

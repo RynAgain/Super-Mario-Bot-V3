@@ -460,12 +460,16 @@ class MarioTrainer:
         else:
             self.logger.error(f"Failed to send reset for episode {self.current_episode + 1}")
         
-        # Create episode in episode manager (single source of truth)
+        # Create episode in episode manager (single source of truth).
+        # IMPORTANT: lives=0 so the first real frame doesn't trigger false
+        # death detection (SMB stores displayed_lives - 1 at 0x075A, so
+        # "3 lives" on screen = byte value 2, not 3).  Setting to 0 ensures
+        # any real value is >= previous and no spurious death fires.
         initial_state = {
             'mario_x': 40,   # World 1-1 start position
             'mario_y': 176,
             'score': 0,
-            'lives': 3,
+            'lives': 0,      # 0 prevents false death on first frame
             'time': 400
         }
         self.episode_manager.start_episode(initial_state)
@@ -707,8 +711,13 @@ class MarioTrainer:
             # Shape validation before training steps
             self._validate_tensor_shapes(frames, state_vector)
             
-            # Agent action selection
-            action_id = self.agent.select_action(frames, state_vector, training=True)
+            # Agent action selection -- use uniform random during warmup to
+            # fill replay buffer with diverse experience (NoisyNet init bias
+            # otherwise causes directional lock before training starts)
+            is_warmup = self.training_phase == TrainingPhase.WARMUP
+            action_id = self.agent.select_action(
+                frames, state_vector, training=True, force_random=is_warmup
+            )
             
             # Convert action ID to button mapping
             action_buttons = self._action_id_to_buttons(action_id)
