@@ -89,11 +89,17 @@ class NoisyLinear(nn.Module):
 
 class DuelingDQN(nn.Module):
     """
-    Dueling DQN implementation with 4-frame stacking and game state fusion.
+    Dueling DQN implementation with 4-frame stacking, game state fusion,
+    and optional C51 distributional output.
     
     The network processes stacked frames through convolutional layers,
     fuses them with game state features, and uses dueling architecture
     to separate value and advantage estimation.
+    
+    When ``num_atoms > 1`` (C51 mode), the value and advantage streams
+    output probability distributions over a discrete set of return atoms
+    instead of scalar values. Q-values are recovered as the expected
+    value: Q(s,a) = sum_i(z_i * p_i(s,a)).
     """
     
     def __init__(
@@ -103,7 +109,11 @@ class DuelingDQN(nn.Module):
         frame_stack_size: int = 4,
         frame_size: Tuple[int, int] = (84, 84),
         noisy: bool = False,
-        sigma_init: float = 0.5
+        sigma_init: float = 0.5,
+        # C51 distributional parameters
+        num_atoms: int = 1,
+        v_min: float = -10.0,
+        v_max: float = 10.0
     ):
         """
         Initialize the Dueling DQN model.
@@ -115,6 +125,9 @@ class DuelingDQN(nn.Module):
             frame_size: Frame dimensions (height, width) = (84, 84)
             noisy: Use NoisyLinear for exploration (replaces epsilon-greedy)
             sigma_init: Initial noise magnitude for NoisyLinear
+            num_atoms: Number of atoms for C51 distributional output (1 = standard DQN)
+            v_min: Minimum return value for C51 support
+            v_max: Maximum return value for C51 support
         """
         super(DuelingDQN, self).__init__()
         
@@ -123,6 +136,17 @@ class DuelingDQN(nn.Module):
         self.frame_stack_size = frame_stack_size
         self.frame_size = frame_size
         self.noisy = noisy
+        
+        # C51 distributional parameters
+        self.num_atoms = num_atoms
+        self.distributional = num_atoms > 1
+        self.v_min = v_min
+        self.v_max = v_max
+        if self.distributional:
+            self.register_buffer(
+                'support', torch.linspace(v_min, v_max, num_atoms)
+            )
+            self.delta_z = (v_max - v_min) / (num_atoms - 1)
         
         # Select linear layer type
         LinearLayer = NoisyLinear if noisy else nn.Linear
@@ -163,13 +187,15 @@ class DuelingDQN(nn.Module):
             **linear_kwargs
         )
         
-        # Value stream (noisy if enabled)
+        # Value stream outputs num_atoms when distributional, 1 otherwise
+        value_out = num_atoms if self.distributional else 1
         self.value_fc1 = LinearLayer(512, 256, **linear_kwargs)
-        self.value_fc2 = LinearLayer(256, 1, **linear_kwargs)
+        self.value_fc2 = LinearLayer(256, value_out, **linear_kwargs)
         
-        # Advantage stream (noisy if enabled)
+        # Advantage stream outputs num_actions * num_atoms when distributional
+        advantage_out = num_actions * num_atoms if self.distributional else num_actions
         self.advantage_fc1 = LinearLayer(512, 256, **linear_kwargs)
-        self.advantage_fc2 = LinearLayer(256, num_actions, **linear_kwargs)
+        self.advantage_fc2 = LinearLayer(256, advantage_out, **linear_kwargs)
         
         # Dropout for regularization (reduced with noisy nets since noise acts as regularizer)
         self.dropout = nn.Dropout(0.1 if noisy else 0.3)
@@ -218,8 +244,18 @@ class DuelingDQN(nn.Module):
             state_vector: Game state vector of shape (batch_size, 12)
             
         Returns:
-            Q-values tensor of shape (batch_size, num_actions)
+            - Standard mode: Q-values tensor of shape (batch_size, num_actions)
+            - C51 mode: Q-values tensor of shape (batch_size, num_actions)
+              (expected values derived from distributions).
+              Use ``forward_dist()`` to get raw log-probabilities.
         """
+        if self.distributional:
+            # C51: get distributions, compute expected Q-values
+            log_probs = self.forward_dist(frames, state_vector)  # (B, A, N)
+            probs = log_probs.exp()
+            q_values = (probs * self.support.unsqueeze(0).unsqueeze(0)).sum(dim=2)
+            return q_values
+        
         batch_size = frames.size(0)
         
         # Process frame stack through convolutional layers
@@ -251,6 +287,60 @@ class DuelingDQN(nn.Module):
         q_values = value + (advantage - advantage_mean)
         
         return q_values
+    
+    def forward_dist(
+        self,
+        frames: torch.Tensor,
+        state_vector: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Forward pass returning C51 log-probability distributions.
+        
+        Only valid when ``num_atoms > 1``.
+        
+        Args:
+            frames: Stacked frames tensor of shape (batch_size, 4, 84, 84)
+            state_vector: Game state vector of shape (batch_size, 12)
+            
+        Returns:
+            Log-probability distributions of shape (batch_size, num_actions, num_atoms)
+        """
+        assert self.distributional, "forward_dist() requires num_atoms > 1"
+        
+        batch_size = frames.size(0)
+        N = self.num_atoms
+        A = self.num_actions
+        
+        # Shared convolutional trunk
+        x = F.relu(self.conv1(frames))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        conv_features = x.contiguous().view(batch_size, -1)
+        
+        # Fusion
+        fused = torch.cat([conv_features, state_vector], dim=1)
+        fused = F.relu(self.fusion_fc(fused))
+        fused = self.dropout(fused)
+        
+        # Value stream -> (B, N)
+        v = F.relu(self.value_fc1(fused))
+        v = self.dropout(v)
+        v = self.value_fc2(v)  # (B, N)
+        v = v.view(batch_size, 1, N)
+        
+        # Advantage stream -> (B, A*N) -> (B, A, N)
+        a = F.relu(self.advantage_fc1(fused))
+        a = self.dropout(a)
+        a = self.advantage_fc2(a)  # (B, A*N)
+        a = a.view(batch_size, A, N)
+        
+        # Dueling combination per-atom: q(s,a,z) = v(s,z) + a(s,a,z) - mean_a(a(s,a,z))
+        q_atoms = v + a - a.mean(dim=1, keepdim=True)
+        
+        # Softmax over atom dimension to get probabilities
+        log_probs = F.log_softmax(q_atoms, dim=2)
+        
+        return log_probs
     
     def reset_noise(self):
         """Reset noise in all NoisyLinear layers. Call before each forward pass during training."""
@@ -315,6 +405,11 @@ class DuelingDQNConfig:
         self.noisy = True              # Enable NoisyNet for exploration
         self.sigma_init = 0.5          # Initial noise magnitude
         
+        # C51 distributional parameters (set num_atoms=1 to disable)
+        self.num_atoms = 51            # Number of atoms (51 is the original C51 paper value)
+        self.v_min = -10.0             # Minimum return value
+        self.v_max = 10.0              # Maximum return value
+        
         # Convolutional layers
         self.conv_layers = [
             {'filters': 32, 'kernel_size': 8, 'stride': 4, 'padding': 2},
@@ -356,7 +451,10 @@ def create_dueling_dqn(config: Optional[DuelingDQNConfig] = None) -> DuelingDQN:
         frame_stack_size=config.frame_stack_size,
         frame_size=config.frame_size,
         noisy=getattr(config, 'noisy', True),
-        sigma_init=getattr(config, 'sigma_init', 0.5)
+        sigma_init=getattr(config, 'sigma_init', 0.5),
+        num_atoms=getattr(config, 'num_atoms', 1),
+        v_min=getattr(config, 'v_min', -10.0),
+        v_max=getattr(config, 'v_max', 10.0)
     )
     
     return model

@@ -116,11 +116,26 @@ class DQNAgent:
     
     def _initialize_networks(self):
         """Initialize main and target networks."""
+        from python.models.dueling_dqn import DuelingDQNConfig
+        
+        # Build config from training config
+        model_config = DuelingDQNConfig()
+        model_config.noisy = self.config.get('noisy_networks', True)
+        model_config.num_atoms = self.config.get('num_atoms', 51)
+        model_config.v_min = self.config.get('v_min', -10.0)
+        model_config.v_max = self.config.get('v_max', 10.0)
+        
+        # Store C51 flag for loss dispatch
+        self.distributional = model_config.num_atoms > 1
+        self.num_atoms = model_config.num_atoms
+        self.v_min = model_config.v_min
+        self.v_max = model_config.v_max
+        
         # Create main network
-        self.q_network = create_dueling_dqn()
+        self.q_network = create_dueling_dqn(model_config)
         
         # Create target network (copy of main network)
-        self.target_network = create_dueling_dqn()
+        self.target_network = create_dueling_dqn(model_config)
         self.target_network.load_state_dict(self.q_network.state_dict())
         
         # Move networks to device and optimize
@@ -419,7 +434,35 @@ class DQNAgent:
         weights: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute DQN loss with optional Double DQN.
+        Compute DQN loss -- dispatches to distributional (C51) or standard path.
+        
+        Returns:
+            Tuple of (loss, td_errors)
+        """
+        if self.distributional:
+            return self._compute_distributional_loss(
+                state_frames, state_vectors, actions, rewards,
+                next_state_frames, next_state_vectors, dones, weights
+            )
+        
+        return self._compute_standard_loss(
+            state_frames, state_vectors, actions, rewards,
+            next_state_frames, next_state_vectors, dones, weights
+        )
+    
+    def _compute_standard_loss(
+        self,
+        state_frames: torch.Tensor,
+        state_vectors: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_state_frames: torch.Tensor,
+        next_state_vectors: torch.Tensor,
+        dones: torch.Tensor,
+        weights: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Standard (non-distributional) DQN loss with optional Double DQN.
         
         Returns:
             Tuple of (loss, td_errors)
@@ -431,27 +474,19 @@ class DQNAgent:
         # Next Q-values
         with torch.no_grad():
             if self.double_dqn:
-                # Double DQN: use main network to select actions, target network to evaluate
                 next_q_values_main = self.q_network(next_state_frames, next_state_vectors)
                 next_actions = next_q_values_main.argmax(dim=1)
-                
                 next_q_values_target = self.target_network(next_state_frames, next_state_vectors)
                 next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
             else:
-                # Standard DQN: use target network for both selection and evaluation
                 next_q_values = self.target_network(next_state_frames, next_state_vectors)
                 next_q_values = next_q_values.max(dim=1)[0]
             
-            # Compute target Q-values with n-step bootstrap
-            # rewards already contain the n-step discounted sum: R_n = r_0 + g*r_1 + ... + g^(n-1)*r_{n-1}
-            # The bootstrap term uses gamma^n since the next state is N steps away
             gamma_n = self.gamma ** self.n_step
             target_q_values = rewards + (gamma_n * next_q_values * (~dones))
         
-        # Compute TD errors
         td_errors = target_q_values - current_q_values
         
-        # Compute loss (Huber loss)
         loss_function = self.config.get('loss_function', 'Huber')
         if loss_function == 'Huber':
             loss = F.smooth_l1_loss(current_q_values, target_q_values, reduction='none')
@@ -460,9 +495,92 @@ class DQNAgent:
         else:
             raise ValueError(f"Unknown loss function: {loss_function}")
         
-        # Apply importance sampling weights
         weighted_loss = (loss * weights).mean()
+        return weighted_loss, td_errors.detach()
+    
+    def _compute_distributional_loss(
+        self,
+        state_frames: torch.Tensor,
+        state_vectors: torch.Tensor,
+        actions: torch.Tensor,
+        rewards: torch.Tensor,
+        next_state_frames: torch.Tensor,
+        next_state_vectors: torch.Tensor,
+        dones: torch.Tensor,
+        weights: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        C51 distributional cross-entropy loss.
         
+        Projects the target distribution onto the fixed support using the
+        Bellman operator, then computes KL divergence (cross-entropy) between
+        the projected target and the current distribution.
+        
+        Returns:
+            Tuple of (loss, td_errors_for_PER)
+        """
+        B = state_frames.size(0)
+        N = self.num_atoms
+        gamma_n = self.gamma ** self.n_step
+        
+        support = self.q_network.support  # (N,)
+        delta_z = self.q_network.delta_z
+        
+        # Current log-probabilities for chosen actions: (B, N)
+        log_probs = self.q_network.forward_dist(state_frames, state_vectors)  # (B, A, N)
+        log_probs_a = log_probs[torch.arange(B), actions]  # (B, N)
+        
+        with torch.no_grad():
+            # --- Double DQN action selection ---
+            if self.double_dqn:
+                # Use main network Q-values (expected) to select best next action
+                next_q = self.q_network(next_state_frames, next_state_vectors)  # (B, A)
+                next_actions = next_q.argmax(dim=1)  # (B,)
+            else:
+                next_q = self.target_network(next_state_frames, next_state_vectors)
+                next_actions = next_q.argmax(dim=1)
+            
+            # Target distribution for the selected next action: (B, N)
+            target_log_probs = self.target_network.forward_dist(
+                next_state_frames, next_state_vectors
+            )  # (B, A, N)
+            target_probs = target_log_probs[torch.arange(B), next_actions].exp()  # (B, N)
+            
+            # --- Bellman projection ---
+            # T_z = r + gamma^n * z  (clipped to [v_min, v_max])
+            Tz = rewards.unsqueeze(1) + gamma_n * (~dones).unsqueeze(1).float() * support.unsqueeze(0)
+            Tz = Tz.clamp(self.v_min, self.v_max)  # (B, N)
+            
+            # Map Tz onto atom indices
+            b_idx = (Tz - self.v_min) / delta_z  # (B, N), float in [0, N-1]
+            lower = b_idx.floor().long()
+            upper = b_idx.ceil().long()
+            
+            # Clamp to valid range
+            lower = lower.clamp(0, N - 1)
+            upper = upper.clamp(0, N - 1)
+            
+            # Distribute probability mass to neighbors
+            projected = torch.zeros(B, N, device=state_frames.device)
+            
+            # Fraction allocated to upper neighbor
+            upper_frac = b_idx - lower.float()
+            lower_frac = 1.0 - upper_frac
+            
+            # Scatter-add probabilities
+            projected.scatter_add_(1, lower, target_probs * lower_frac)
+            projected.scatter_add_(1, upper, target_probs * upper_frac)
+        
+        # Cross-entropy loss: -sum(m_i * log(p_i))
+        loss_per_sample = -(projected * log_probs_a).sum(dim=1)  # (B,)
+        
+        # TD errors for PER (use expected Q difference as proxy)
+        with torch.no_grad():
+            current_q = (log_probs_a.exp() * support.unsqueeze(0)).sum(dim=1)
+            target_q = (projected * support.unsqueeze(0)).sum(dim=1)
+            td_errors = target_q - current_q
+        
+        weighted_loss = (loss_per_sample * weights).mean()
         return weighted_loss, td_errors.detach()
     
     def _update_target_network(self):

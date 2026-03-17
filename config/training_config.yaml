@@ -41,6 +41,11 @@ training:
   n_step: 3                       # N-step returns for faster value propagation
   noisy_networks: true            # NoisyNet: state-dependent exploration (replaces epsilon-greedy)
   
+  # C51 Distributional DQN (completes Rainbow: 6/6 components)
+  num_atoms: 51                   # Number of atoms for return distribution (1 = standard DQN)
+  v_min: -10.0                    # Minimum return value (should cover worst episode reward)
+  v_max: 10.0                     # Maximum return value (should cover best episode reward)
+  
   # Curriculum Learning
   # NOTE: epsilon_override was removed -- it completely blocked the per-episode
   # epsilon decay, locking epsilon at 0.8 for the first 10k episodes.
