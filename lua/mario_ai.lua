@@ -2415,6 +2415,16 @@ local function process_frame()
         end
         
         debug_log(string.format("Terminal condition detected: %s", event_type), "INFO")
+        
+        -- CRITICAL: Send the terminal game_state frame BEFORE resetting.
+        -- Python needs to see the death frame (with decreased lives) to:
+        --   1. Apply the death penalty in the reward calculator
+        --   2. Store the terminal transition in the replay buffer
+        --   3. Properly end the episode with correct final position
+        -- Previously this was skipped, so Python never saw deaths.
+        send_game_state(game_state)
+        
+        -- Now send the episode event so Python knows this is terminal
         send_episode_event(event_type, game_state)
         
         -- Reset for next episode immediately

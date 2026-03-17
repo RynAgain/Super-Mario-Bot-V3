@@ -952,21 +952,37 @@ class MarioTrainer:
     async def _handle_episode_event(self, data: Dict[str, Any]):
         """Handle episode event from Lua script.
         
-        NOTE: Do NOT call episode_manager.start_episode() here.
-        Episodes are created exclusively by _handle_game_state() when the
-        first game state frame arrives.  This prevents the triple-counting
-        bug where episodes were created by:
-          1. _start_episode() -> sends reset to Lua
-          2. Lua responds with episode_event:started -> this handler
-          3. _handle_game_state() -> no current episode, creates another
+        Terminal events (death, level_complete, time_up) mark the current
+        episode as ended so the training loop advances to the next episode.
+        
+        NOTE: Do NOT call episode_manager.start_episode() here for "started"
+        events.  Episodes are created exclusively by _start_episode().
         """
         event = data.get('event')
         episode_id = data.get('episode_id')
         
         self.logger.info(f"Lua episode {episode_id} event: {event}")
         
-        # Just log the event -- episode lifecycle is managed by the training loop
-        # and _handle_game_state(), not by Lua events.
+        # Terminal events from Lua: mark the episode as ended
+        # Lua sends the terminal game_state frame just before this event,
+        # so the reward calculator and replay buffer already have the death data.
+        # This handler ensures the training loop sees the episode as finished.
+        if event in ('death', 'level_complete', 'time_up'):
+            if (self.episode_manager.current_episode and
+                    self.episode_manager.current_episode.status.value == "running"):
+                from python.environment.episode_manager import EpisodeStatus
+                self.episode_manager.current_episode.termination_reason = event
+                if event == 'level_complete':
+                    self.episode_manager.current_episode.level_completed = True
+                    self.episode_manager.current_episode.status = EpisodeStatus.COMPLETED
+                elif event == 'death':
+                    self.episode_manager.current_episode.status = EpisodeStatus.FAILED
+                else:
+                    self.episode_manager.current_episode.status = EpisodeStatus.TERMINATED
+                self.logger.info(
+                    f"Episode marked terminal by Lua event: {event} "
+                    f"(x={self.episode_manager.current_episode.max_x_reached})"
+                )
     
     async def _handle_frame_advance(self, data: Dict[str, Any]):
         """Handle frame advance notification."""
