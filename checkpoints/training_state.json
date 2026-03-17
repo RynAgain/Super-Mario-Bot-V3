@@ -1,0 +1,26 @@
+{
+  "session_id": "20260316_210346",
+  "episode": 13,
+  "step": 182,
+  "total_steps": 5744,
+  "start_time": 1773713028.0518718,
+  "current_time": 1773713427.459477,
+  "total_episodes_completed": 13,
+  "successful_episodes": 0,
+  "best_episode_reward": -53.900000000000055,
+  "best_episode_distance": 40,
+  "current_episode_reward": -1.4,
+  "current_episode_steps": 183,
+  "current_episode_max_x": 40,
+  "epsilon": 0.976262247894715,
+  "learning_rate": 0.00025,
+  "replay_buffer_size": 5741,
+  "avg_episode_reward": -53.99230769230773,
+  "avg_episode_distance": 40.0,
+  "completion_rate": 0.0,
+  "recent_performance": [
+    0.0
+  ],
+  "curriculum_phase": "exploration",
+  "training_phase": "warmup"
+}
