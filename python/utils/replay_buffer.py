@@ -261,22 +261,41 @@ class ReplayBuffer:
         weights = []
         
         # Sample from priority tree
-        segment = self.tree[0] / batch_size
+        total_priority = self.tree[0]
+        if total_priority <= 0:
+            # Fallback to uniform sampling if tree is empty/zeroed
+            return (
+                self._sample_uniform(batch_size),
+                torch.ones(batch_size, device=self.device)
+            )
+        
+        segment = total_priority / batch_size
         
         for i in range(batch_size):
             a = segment * i
             b = segment * (i + 1)
             s = random.uniform(a, b)
-            idx = self._retrieve(0, s)
-            indices.append(idx)
             
-            # Calculate importance sampling weight
-            prob = self.tree[idx + self.tree_capacity - 1] / self.tree[0]
+            # _retrieve returns a tree index (leaf node position)
+            tree_idx = self._retrieve(0, s)
+            
+            # Convert tree index to buffer index
+            buffer_idx = tree_idx - self.tree_capacity + 1
+            
+            # Clamp to valid buffer range (handles empty leaf slots
+            # when tree_capacity > buffer capacity)
+            buffer_idx = max(0, min(buffer_idx, self.size - 1))
+            
+            indices.append(buffer_idx)
+            
+            # Calculate importance sampling weight using tree index directly
+            prob = self.tree[tree_idx] / total_priority
+            prob = max(prob, 1e-8)  # Avoid division by zero
             weight = (self.size * prob) ** (-self.beta)
             weights.append(weight)
         
         # Normalize weights
-        max_weight = max(weights)
+        max_weight = max(weights) if weights else 1.0
         weights = [w / max_weight for w in weights]
         
         # Update beta

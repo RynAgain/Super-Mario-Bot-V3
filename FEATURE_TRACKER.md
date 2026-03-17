@@ -53,6 +53,7 @@ to actually learn. Work top-down -- each section builds on the one above it.
 - [x] Fix episode triple-counting (trainer, Lua event, and game state handler all created episodes)
 - [x] Fix false death on episode start: initial `lives=3` vs SMB `lives=2` (displayed-1) triggered -50 penalty every first frame
 - [x] Fix NoisyNet warmup directional lock: force uniform random actions during warmup episodes
+- [x] Fix death not ending episodes: Lua now sends terminal game_state frame BEFORE save state reset; Python `_handle_episode_event` marks episode as FAILED/COMPLETED/TERMINATED
 
 ---
 
