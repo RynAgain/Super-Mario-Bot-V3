@@ -243,3 +243,213 @@ Performance Impact:
 2026-03-16 21:10:31,507 - python.training.trainer - INFO - Training loop completed
 2026-03-16 21:10:31,507 - python.training.trainer - INFO - Training flagged to stop but still running - skipping cleanup to allow recovery
 2026-03-16 21:10:31,507 - __main__ - INFO - Training completed successfully
+2026-03-16 22:28:56,066 - __main__ - INFO - Starting Super Mario Bros AI Training System
+2026-03-16 22:28:56,071 - python.utils.config_loader - INFO - Loaded configuration file: training_config.yaml
+2026-03-16 22:28:56,072 - python.training.trainer - INFO - Initializing Mario Trainer - Session: 20260316_222856
+2026-03-16 22:28:56,073 - python.training.trainer - INFO - TensorBoard logging enabled -> runs\20260316_222856
+2026-03-16 22:28:56,123 - python.mario_logging.csv_logger - INFO - CSV Logger initialized with session ID: 20260316_222856
+2026-03-16 22:28:56,123 - python.training.training_utils - INFO - Training state manager initialized: checkpoints
+2026-03-16 22:28:56,182 - python.utils.model_utils - INFO - Using device: cuda
+2026-03-16 22:28:56,184 - python.utils.model_utils - INFO - GPU Info: NVIDIA GeForce RTX 4070 Laptop GPU (8.0GB)
+2026-03-16 22:28:56,184 - python.utils.model_utils - INFO - Available GPUs: 1
+2026-03-16 22:28:56,341 - python.utils.windows_optimization - INFO - Applied Windows optimizations: TensorFloat-32 enabled, cuDNN benchmark mode enabled, Channels-last memory format enabled, Mixed precision autocast available
+2026-03-16 22:28:56,342 - python.utils.model_utils - INFO - Applied Windows-specific PyTorch optimizations
+2026-03-16 22:28:56,342 - python.utils.model_utils - INFO - Windows optimization report:
+Windows PyTorch Optimization Report:
+==================================================
+Environment Optimizations:
+- CUDA async operations: Enabled
+- cuDNN v8 API: Enabled
+- TF32 override: Enabled
+- OMP threads: 8
+
+Model Optimizations Applied:
+- TensorFloat-32 enabled
+- cuDNN benchmark mode enabled
+- Channels-last memory format enabled
+- Mixed precision autocast available
+
+GPU: NVIDIA GeForce RTX 4070 Laptop GPU (8.0GB)
+- Ampere architecture detected: TF32 optimizations available
+
+Performance Impact:
+- Expected speedup: 15-30% over unoptimized PyTorch
+- Memory efficiency: Improved through optimized allocation
+- Training stability: Enhanced through mixed precision
+
+2026-03-16 22:28:56,342 - python.utils.model_utils - INFO - Mixed precision training enabled
+2026-03-16 22:28:56,355 - python.utils.windows_optimization - INFO - Created optimized gradient scaler (new API)
+2026-03-16 22:28:56,355 - python.agents.dqn_agent - INFO - Networks initialized on device: cuda
+2026-03-16 22:28:56,412 - python.agents.dqn_agent - INFO - Using prioritized experience replay
+2026-03-16 22:28:57,431 - python.agents.dqn_agent - INFO - Optimizer initialized: Adam
+2026-03-16 22:28:57,432 - python.agents.dqn_agent - INFO - DQN Agent initialized successfully
+2026-03-16 22:28:57,432 - python.environment.episode_manager - INFO - Episode manager initialized with log directory: logs
+2026-03-16 22:28:57,433 - python.capture.frame_capture - INFO - Found window: FCEUX 2.6.6 at (1, 77, 529, 584)
+2026-03-16 22:28:57,433 - python.capture.frame_capture - INFO - Game capture region: (27, 55, 473, 444)
+2026-03-16 22:28:57,434 - python.training.training_utils - INFO - Initialized training state for session: 20260316_222856
+2026-03-16 22:28:57,434 - python.training.trainer - INFO - All subsystems initialized successfully
+2026-03-16 22:28:57,434 - python.training.trainer - INFO - Mario Trainer initialization completed
+2026-03-16 22:28:57,434 - python.training.trainer - INFO - Starting Mario AI training...
+2026-03-16 22:28:57,434 - python.communication.websocket_server - INFO - Starting WebSocket server on localhost:8765
+2026-03-16 22:28:57,440 - python.communication.websocket_server - INFO - WebSocket server started successfully
+2026-03-16 22:28:57,440 - python.training.trainer - INFO - Waiting for FCEUX client connection...
+2026-03-16 22:29:15,444 - python.communication.websocket_server - INFO - Client connected from 127.0.0.1:59445
+2026-03-16 22:29:15,445 - python.communication.websocket_server - INFO - Received initialization message
+2026-03-16 22:29:15,445 - python.communication.websocket_server - INFO - Sent initialization acknowledgment (enhanced_features: False)
+2026-03-16 22:29:15,614 - python.training.trainer - INFO - Client connected, starting training loop...
+2026-03-16 22:29:15,615 - python.capture.frame_capture - INFO - Using Lua screen capture mode (no window capture needed)
+2026-03-16 22:29:15,615 - python.training.trainer - INFO - Frame capture started successfully
+2026-03-16 22:29:15,615 - python.training.trainer - INFO - Entering main training loop...
+2026-03-16 22:29:15,615 - python.training.trainer - INFO - Starting episode 1
+2026-03-16 22:29:15,617 - python.training.trainer - INFO - Lua episode 1 event: started
+2026-03-16 22:29:16,128 - python.environment.episode_manager - INFO - Started episode 1 in exploration phase
+2026-03-16 22:29:16,129 - python.training.trainer - INFO - Starting episode 1, waiting for game state data...
+2026-03-16 22:29:22,783 - python.training.trainer - INFO - Episode 1, Step 100: Reward=0.00, Total=21.30, Mario X=19, Action=0
+2026-03-16 22:29:29,455 - python.training.trainer - INFO - Episode 1, Step 200: Reward=-0.10, Total=28.80, Mario X=40, Action=0
+2026-03-16 22:29:36,129 - python.training.trainer - INFO - Episode 1, Step 300: Reward=0.00, Total=30.90, Mario X=61, Action=4
+2026-03-16 22:29:42,801 - python.training.trainer - INFO - Episode 1, Step 400: Reward=0.00, Total=91.60, Mario X=65, Action=5
+2026-03-16 22:29:47,320 - python.training.trainer - INFO - Lua episode 1 event: death
+2026-03-16 22:29:49,471 - python.training.trainer - INFO - Episode 1, Step 500: Reward=0.10, Total=85.80, Mario X=7, Action=7
+2026-03-16 22:29:56,129 - python.training.trainer - INFO - Episode 1, Step 600: Reward=0.00, Total=89.60, Mario X=45, Action=11
+2026-03-16 22:30:02,783 - python.training.trainer - INFO - Episode 1, Step 700: Reward=0.00, Total=98.10, Mario X=130, Action=3
+2026-03-16 22:30:09,446 - python.training.trainer - INFO - Episode 1, Step 800: Reward=0.00, Total=117.30, Mario X=88, Action=1
+2026-03-16 22:30:16,111 - python.training.trainer - INFO - Episode 1, Step 900: Reward=0.00, Total=119.70, Mario X=112, Action=11
+2026-03-16 22:30:22,768 - python.training.trainer - INFO - Episode 1, Step 1000: Reward=0.10, Total=120.70, Mario X=122, Action=4
+2026-03-16 22:30:29,421 - python.training.trainer - INFO - Episode 1, Step 1100: Reward=0.10, Total=117.10, Mario X=86, Action=2
+2026-03-16 22:30:36,080 - python.training.trainer - INFO - Episode 1, Step 1200: Reward=0.00, Total=117.00, Mario X=85, Action=7
+2026-03-16 22:30:38,786 - python.training.trainer - INFO - Terminal state detected in episode manager: stuck_timeout
+2026-03-16 22:30:38,862 - python.training.trainer - INFO - Episode ended by game state handler
+2026-03-16 22:30:38,862 - python.agents.dqn_agent - INFO - Episode 1 completed: Reward=118.0, Length=4963, Epsilon=0.998
+2026-03-16 22:30:38,872 - python.environment.episode_manager - INFO - Episode 1 completed: Status=terminated, Reward=134.5, Distance=165, Progress=5.2%, Duration=82.7s, FPS=60.0
+2026-03-16 22:30:38,874 - python.training.trainer - INFO - Episode 1 completed: Reward=118.0, Distance=165, Duration=82.7s, Completed=False
+2026-03-16 22:30:38,874 - python.training.trainer - INFO - Saving checkpoint at episode 0
+2026-03-16 22:30:38,901 - python.training.training_utils - INFO - Created checkpoint: checkpoints\checkpoint_ep1_20260316_223038.pt
+2026-03-16 22:30:38,902 - python.training.trainer - INFO - Checkpoint saved: checkpoints\checkpoint_ep1_20260316_223038.pt
+2026-03-16 22:30:38,902 - python.training.trainer - INFO - Starting episode 2
+2026-03-16 22:30:38,903 - python.training.trainer - INFO - Lua episode 2 event: started
+2026-03-16 22:30:39,410 - python.environment.episode_manager - INFO - Started episode 2 in exploration phase
+2026-03-16 22:30:39,411 - python.training.trainer - INFO - Starting episode 2, waiting for game state data...
+2026-03-16 22:30:46,048 - python.training.trainer - INFO - Episode 2, Step 100: Reward=0.00, Total=149.30, Mario X=183, Action=5
+2026-03-16 22:30:49,484 - python.training.trainer - INFO - Lua episode 2 event: death
+2026-03-16 22:30:52,712 - python.training.trainer - INFO - Episode 2, Step 200: Reward=0.00, Total=134.30, Mario X=33, Action=5
+2026-03-16 22:30:59,371 - python.training.trainer - INFO - Episode 2, Step 300: Reward=0.00, Total=133.10, Mario X=21, Action=0
+2026-03-16 22:31:06,029 - python.training.trainer - INFO - Episode 2, Step 400: Reward=-0.10, Total=132.00, Mario X=10, Action=4
+2026-03-16 22:31:12,681 - python.training.trainer - INFO - Episode 2, Step 500: Reward=0.00, Total=131.60, Mario X=6, Action=6
+2026-03-16 22:31:19,340 - python.training.trainer - INFO - Episode 2, Step 600: Reward=0.00, Total=131.10, Mario X=1, Action=0
+2026-03-16 22:31:25,997 - python.training.trainer - INFO - Episode 2, Step 700: Reward=0.10, Total=132.70, Mario X=17, Action=4
+2026-03-16 22:31:31,514 - python.training.trainer - INFO - Lua episode 3 event: death
+2026-03-16 22:31:32,665 - python.training.trainer - INFO - Episode 2, Step 800: Reward=0.00, Total=175.20, Mario X=19, Action=8
+2026-03-16 22:31:39,325 - python.training.trainer - INFO - Episode 2, Step 900: Reward=0.00, Total=173.50, Mario X=2, Action=11
+2026-03-16 22:31:45,977 - python.training.trainer - INFO - Episode 2, Step 1000: Reward=0.00, Total=179.60, Mario X=63, Action=0
+2026-03-16 22:31:52,633 - python.training.trainer - INFO - Episode 2, Step 1100: Reward=0.00, Total=187.50, Mario X=142, Action=2
+2026-03-16 22:31:56,372 - python.training.trainer - INFO - Lua episode 4 event: death
+2026-03-16 22:31:59,302 - python.training.trainer - INFO - Episode 2, Step 1200: Reward=0.00, Total=178.10, Mario X=48, Action=5
+2026-03-16 22:32:05,963 - python.training.trainer - INFO - Episode 2, Step 1300: Reward=0.00, Total=177.30, Mario X=40, Action=1
+2026-03-16 22:32:12,622 - python.training.trainer - INFO - Episode 2, Step 1400: Reward=0.00, Total=173.50, Mario X=2, Action=7
+2026-03-16 22:32:19,270 - python.training.trainer - INFO - Episode 2, Step 1500: Reward=0.00, Total=173.60, Mario X=3, Action=2
+2026-03-16 22:32:25,927 - python.training.trainer - INFO - Episode 2, Step 1600: Reward=0.00, Total=173.70, Mario X=4, Action=3
+2026-03-16 22:32:26,374 - python.training.trainer - INFO - Terminal state detected in episode manager: stuck_timeout
+2026-03-16 22:32:26,464 - python.training.trainer - INFO - Episode ended by game state handler
+2026-03-16 22:32:26,465 - python.agents.dqn_agent - INFO - Episode 2 completed: Reward=174.5, Length=6427, Epsilon=0.996
+2026-03-16 22:32:26,465 - python.environment.episode_manager - INFO - Episode 2 completed: Status=terminated, Reward=198.2, Distance=237, Progress=7.5%, Duration=107.1s, FPS=60.0
+2026-03-16 22:32:26,467 - python.training.trainer - INFO - Episode 2 completed: Reward=174.5, Distance=237, Duration=107.1s, Completed=False
+2026-03-16 22:32:26,468 - python.training.trainer - INFO - Starting episode 3
+2026-03-16 22:32:26,468 - python.training.trainer - INFO - Lua episode 3 event: started
+2026-03-16 22:32:26,969 - python.environment.episode_manager - INFO - Started episode 3 in exploration phase
+2026-03-16 22:32:26,970 - python.training.trainer - INFO - Starting episode 3, waiting for game state data...
+2026-03-16 22:32:33,654 - python.training.trainer - INFO - Episode 3, Step 100: Reward=0.00, Total=95.90, Mario X=135, Action=3
+2026-03-16 22:32:40,324 - python.training.trainer - INFO - Episode 3, Step 200: Reward=0.00, Total=93.00, Mario X=70, Action=4
+2026-03-16 22:32:43,277 - python.training.trainer - INFO - Lua episode 3 event: death
+2026-03-16 22:32:46,998 - python.training.trainer - INFO - Episode 3, Step 300: Reward=0.00, Total=92.40, Mario X=64, Action=5
+2026-03-16 22:32:53,672 - python.training.trainer - INFO - Episode 3, Step 400: Reward=0.00, Total=87.10, Mario X=11, Action=0
+2026-03-16 22:33:00,324 - python.training.trainer - INFO - Episode 3, Step 500: Reward=0.00, Total=88.30, Mario X=23, Action=6
+2026-03-16 22:33:06,982 - python.training.trainer - INFO - Episode 3, Step 600: Reward=0.00, Total=86.60, Mario X=6, Action=1
+2026-03-16 22:33:13,299 - python.training.trainer - INFO - Terminal state detected in episode manager: stuck_timeout
+2026-03-16 22:33:13,333 - python.training.trainer - INFO - Episode ended by game state handler
+2026-03-16 22:33:13,333 - python.agents.dqn_agent - INFO - Episode 3 completed: Reward=95.8, Length=2780, Epsilon=0.994
+2026-03-16 22:33:13,334 - python.environment.episode_manager - INFO - Episode 3 completed: Status=terminated, Reward=109.8, Distance=140, Progress=4.4%, Duration=46.4s, FPS=60.0
+2026-03-16 22:33:13,336 - python.training.trainer - INFO - Episode 3 completed: Reward=95.8, Distance=140, Duration=46.4s, Completed=False
+2026-03-16 22:33:13,337 - python.training.trainer - INFO - Starting episode 4
+2026-03-16 22:33:13,338 - python.training.trainer - INFO - Lua episode 4 event: started
+2026-03-16 22:33:13,850 - python.environment.episode_manager - INFO - Started episode 4 in exploration phase
+2026-03-16 22:33:13,851 - python.training.trainer - INFO - Starting episode 4, waiting for game state data...
+2026-03-16 22:33:20,490 - python.training.trainer - INFO - Episode 4, Step 100: Reward=0.00, Total=21.30, Mario X=46, Action=0
+2026-03-16 22:33:27,164 - python.training.trainer - INFO - Episode 4, Step 200: Reward=-0.20, Total=205.90, Mario X=164, Action=6
+2026-03-16 22:33:33,823 - python.training.trainer - INFO - Episode 4, Step 300: Reward=0.00, Total=400.30, Mario X=425, Action=8
+2026-03-16 22:33:40,497 - python.training.trainer - INFO - Episode 4, Step 400: Reward=0.00, Total=392.30, Mario X=345, Action=8
+2026-03-16 22:33:47,148 - python.training.trainer - INFO - Episode 4, Step 500: Reward=0.00, Total=394.40, Mario X=366, Action=3
+2026-03-16 22:33:53,801 - python.training.trainer - INFO - Episode 4, Step 600: Reward=0.00, Total=397.80, Mario X=400, Action=10
+2026-03-16 22:34:00,473 - python.training.trainer - INFO - Episode 4, Step 700: Reward=0.00, Total=393.20, Mario X=354, Action=6
+2026-03-16 22:34:07,132 - python.training.trainer - INFO - Episode 4, Step 800: Reward=0.00, Total=393.10, Mario X=353, Action=7
+2026-03-16 22:34:13,787 - python.training.trainer - INFO - Episode 4, Step 900: Reward=0.00, Total=393.10, Mario X=353, Action=10
+2026-03-16 22:34:20,439 - python.training.trainer - INFO - Episode 4, Step 1000: Reward=0.10, Total=426.50, Mario X=426, Action=6
+2026-03-16 22:34:27,096 - python.training.trainer - INFO - Episode 4, Step 1100: Reward=0.00, Total=554.00, Mario X=594, Action=5
+2026-03-16 22:34:33,752 - python.training.trainer - INFO - Episode 4, Step 1200: Reward=0.00, Total=552.60, Mario X=580, Action=5
+2026-03-16 22:34:40,403 - python.training.trainer - INFO - Episode 4, Step 1300: Reward=0.00, Total=554.80, Mario X=594, Action=7
+2026-03-16 22:34:47,062 - python.training.trainer - INFO - Episode 4, Step 1400: Reward=0.00, Total=554.70, Mario X=593, Action=5
+2026-03-16 22:34:53,718 - python.training.trainer - INFO - Episode 4, Step 1500: Reward=0.00, Total=552.60, Mario X=572, Action=7
+2026-03-16 22:35:00,376 - python.training.trainer - INFO - Episode 4, Step 1600: Reward=0.00, Total=553.50, Mario X=581, Action=8
+2026-03-16 22:35:07,032 - python.training.trainer - INFO - Episode 4, Step 1700: Reward=0.00, Total=554.70, Mario X=593, Action=0
+2026-03-16 22:35:13,687 - python.training.trainer - INFO - Episode 4, Step 1800: Reward=0.00, Total=554.80, Mario X=594, Action=8
+2026-03-16 22:35:20,343 - python.training.trainer - INFO - Episode 4, Step 1900: Reward=0.10, Total=547.10, Mario X=517, Action=6
+2026-03-16 22:35:27,014 - python.training.trainer - INFO - Episode 4, Step 2000: Reward=0.10, Total=549.30, Mario X=539, Action=5
+2026-03-16 22:35:33,685 - python.training.trainer - INFO - Episode 4, Step 2100: Reward=0.00, Total=554.80, Mario X=594, Action=6
+2026-03-16 22:35:40,342 - python.training.trainer - INFO - Episode 4, Step 2200: Reward=0.00, Total=552.80, Mario X=574, Action=5
+2026-03-16 22:35:46,996 - python.training.trainer - INFO - Episode 4, Step 2300: Reward=0.00, Total=552.50, Mario X=571, Action=8
+2026-03-16 22:35:53,667 - python.training.trainer - INFO - Episode 4, Step 2400: Reward=0.00, Total=547.00, Mario X=516, Action=11
+2026-03-16 22:35:54,178 - python.training.trainer - INFO - Terminal state detected in episode manager: timeout
+2026-03-16 22:35:54,217 - python.training.trainer - INFO - Episode ended by game state handler
+2026-03-16 22:35:54,218 - python.agents.dqn_agent - INFO - Episode 4 completed: Reward=547.9, Length=9631, Epsilon=0.992
+2026-03-16 22:35:54,218 - python.environment.episode_manager - INFO - Episode 4 completed: Status=failed, Reward=607.4, Distance=595, Progress=18.8%, Duration=160.4s, FPS=60.1
+2026-03-16 22:35:54,220 - python.training.trainer - INFO - Episode 4 completed: Reward=547.9, Distance=595, Duration=160.4s, Completed=False
+2026-03-16 22:35:54,221 - python.training.trainer - INFO - Starting episode 5
+2026-03-16 22:35:54,222 - python.training.trainer - INFO - Lua episode 5 event: started
+2026-03-16 22:35:54,723 - python.environment.episode_manager - INFO - Started episode 5 in exploration phase
+2026-03-16 22:35:54,724 - python.training.trainer - INFO - Starting episode 5, waiting for game state data...
+2026-03-16 22:36:01,370 - python.training.trainer - INFO - Episode 5, Step 100: Reward=0.00, Total=138.00, Mario X=178, Action=0
+2026-03-16 22:36:08,026 - python.training.trainer - INFO - Episode 5, Step 200: Reward=0.00, Total=137.30, Mario X=117, Action=3
+2026-03-16 22:36:14,686 - python.training.trainer - INFO - Episode 5, Step 300: Reward=0.00, Total=137.00, Mario X=114, Action=7
+2026-03-16 22:36:21,356 - python.training.trainer - INFO - Episode 5, Step 400: Reward=0.00, Total=137.50, Mario X=119, Action=11
+2026-03-16 22:36:28,009 - python.training.trainer - INFO - Episode 5, Step 500: Reward=0.00, Total=139.20, Mario X=136, Action=4
+2026-03-16 22:36:32,314 - python.training.trainer - INFO - Terminal state detected in episode manager: stuck_timeout
+2026-03-16 22:36:32,396 - python.training.trainer - INFO - Episode ended by game state handler
+2026-03-16 22:36:32,397 - python.agents.dqn_agent - INFO - Episode 5 completed: Reward=138.3, Length=2259, Epsilon=0.990
+2026-03-16 22:36:32,397 - python.environment.episode_manager - INFO - Episode 5 completed: Status=terminated, Reward=156.7, Distance=184, Progress=5.8%, Duration=37.7s, FPS=60.0
+2026-03-16 22:36:32,399 - python.training.trainer - INFO - Episode 5 completed: Reward=138.3, Distance=184, Duration=37.7s, Completed=False
+2026-03-16 22:36:32,400 - python.training.trainer - INFO - Starting episode 6
+2026-03-16 22:36:32,403 - python.training.trainer - INFO - Lua episode 6 event: started
+2026-03-16 22:36:32,909 - python.environment.episode_manager - INFO - Started episode 6 in exploration phase
+2026-03-16 22:36:32,910 - python.training.trainer - INFO - Starting episode 6, waiting for game state data...
+2026-03-16 22:36:39,540 - python.training.trainer - INFO - Episode 6, Step 100: Reward=0.00, Total=7.00, Mario X=47, Action=5
+2026-03-16 22:36:46,197 - python.training.trainer - INFO - Episode 6, Step 200: Reward=0.00, Total=34.30, Mario X=68, Action=2
+2026-03-16 22:36:52,851 - python.training.trainer - INFO - Episode 6, Step 300: Reward=0.00, Total=53.10, Mario X=22, Action=4
+2026-03-16 22:36:59,526 - python.training.trainer - INFO - Episode 6, Step 400: Reward=0.10, Total=180.00, Mario X=184, Action=3
+2026-03-16 22:37:06,177 - python.training.trainer - INFO - Episode 6, Step 500: Reward=0.00, Total=176.90, Mario X=153, Action=11
+2026-03-16 22:37:12,836 - python.training.trainer - INFO - Episode 6, Step 600: Reward=0.00, Total=177.90, Mario X=163, Action=8
+2026-03-16 22:37:19,490 - python.training.trainer - INFO - Episode 6, Step 700: Reward=0.00, Total=202.50, Mario X=239, Action=3
+2026-03-16 22:37:26,154 - python.training.trainer - INFO - Episode 6, Step 800: Reward=1.00, Total=366.90, Mario X=407, Action=5
+2026-03-16 22:37:32,801 - python.training.trainer - INFO - Episode 6, Step 900: Reward=0.00, Total=447.80, Mario X=478, Action=10
+2026-03-16 22:37:39,456 - python.training.trainer - INFO - Episode 6, Step 1000: Reward=0.00, Total=472.20, Mario X=497, Action=0
+2026-03-16 22:37:46,118 - python.training.trainer - INFO - Episode 6, Step 1100: Reward=0.00, Total=469.10, Mario X=466, Action=8
+2026-03-16 22:37:52,783 - python.training.trainer - INFO - Episode 6, Step 1200: Reward=-0.20, Total=548.90, Mario X=535, Action=9
+2026-03-16 22:37:59,442 - python.training.trainer - INFO - Episode 6, Step 1300: Reward=0.10, Total=550.80, Mario X=554, Action=9
+2026-03-16 22:38:04,661 - python.training.trainer - INFO - Lua episode 6 event: death
+2026-03-16 22:38:06,113 - python.training.trainer - INFO - Episode 6, Step 1400: Reward=0.10, Total=595.20, Mario X=54, Action=8
+2026-03-16 22:38:12,787 - python.training.trainer - INFO - Episode 6, Step 1500: Reward=0.00, Total=591.70, Mario X=19, Action=7
+2026-03-16 22:38:19,443 - python.training.trainer - INFO - Episode 6, Step 1600: Reward=0.00, Total=600.20, Mario X=104, Action=9
+2026-03-16 22:38:26,095 - python.training.trainer - INFO - Episode 6, Step 1700: Reward=0.00, Total=597.80, Mario X=80, Action=3
+2026-03-16 22:38:32,751 - python.training.trainer - INFO - Episode 6, Step 1800: Reward=0.00, Total=605.20, Mario X=154, Action=3
+2026-03-16 22:38:39,406 - python.training.trainer - INFO - Episode 6, Step 1900: Reward=0.10, Total=601.50, Mario X=117, Action=9
+2026-03-16 22:38:46,064 - python.training.trainer - INFO - Episode 6, Step 2000: Reward=0.00, Total=609.30, Mario X=195, Action=11
+2026-03-16 22:38:52,717 - python.training.trainer - INFO - Episode 6, Step 2100: Reward=0.00, Total=604.50, Mario X=147, Action=5
+2026-03-16 22:38:55,320 - python.communication.websocket_server - INFO - Client disconnect notification: script_shutdown
+2026-03-16 22:38:55,321 - python.communication.websocket_server - INFO - Client 127.0.0.1:59445 disconnected (code=1006, reason='')
+2026-03-16 22:38:55,322 - python.communication.websocket_server - WARNING - Close code suggests ping/pong timeout or abnormal closure
+2026-03-16 22:38:55,391 - python.agents.dqn_agent - INFO - Episode 6 completed: Reward=607.1, Length=8556, Epsilon=0.988
+2026-03-16 22:38:55,392 - python.environment.episode_manager - INFO - Episode 6 completed: Status=terminated, Reward=677.1, Distance=700, Progress=22.1%, Duration=142.5s, FPS=60.0
+2026-03-16 22:38:55,395 - python.training.trainer - INFO - Episode 6 completed: Reward=607.1, Distance=700, Duration=142.5s, Completed=False
+2026-03-16 22:38:55,395 - python.training.trainer - WARNING - Client disconnected, waiting for reconnection...
+2026-03-16 22:38:57,729 - __main__ - INFO - Received signal 2, initiating graceful shutdown...
+2026-03-16 22:38:58,428 - python.training.trainer - INFO - Training loop completed
+2026-03-16 22:38:58,429 - python.training.trainer - INFO - Training flagged to stop but still running - skipping cleanup to allow recovery
+2026-03-16 22:38:58,429 - __main__ - INFO - Training completed successfully
