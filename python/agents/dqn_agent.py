@@ -227,11 +227,18 @@ class DQNAgent:
         if force_random:
             return np.random.randint(0, 12)
         
-        # NoisyNet: exploration comes from network noise, not epsilon
+        # NoisyNet: exploration comes from network noise, not epsilon.
+        # HOWEVER, NoisyNet sigma can collapse to near-zero, killing exploration.
+        # We add a minimum epsilon floor so there is always SOME random exploration.
         use_noisy = getattr(self.q_network, 'noisy', False)
         
-        if not use_noisy and training and np.random.random() < self.epsilon:
-            # Epsilon-greedy random action (only when NoisyNet is disabled)
+        # Epsilon floor: even with NoisyNet, enforce a minimum random action rate
+        # to prevent total policy collapse. The floor is higher than epsilon_end
+        # so exploration never fully dies.
+        noisy_epsilon_floor = 0.05  # 5% random actions minimum
+        effective_epsilon = max(self.epsilon, noisy_epsilon_floor) if use_noisy else self.epsilon
+        
+        if training and np.random.random() < effective_epsilon:
             return np.random.randint(0, 12)
         else:
             with torch.no_grad():

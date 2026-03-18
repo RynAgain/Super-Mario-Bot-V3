@@ -143,7 +143,9 @@ class MarioTrainer:
                 frame_skip=training_config.get('frame_skip', 4),
                 enable_curriculum=training_config.get('curriculum', {}).get('enabled', True),
                 enable_plotting=False,
-                reward_clip=1.0  # Clip rewards to [-1, +1] for Q-value stability
+                reward_clip=10.0  # Clip rewards to [-10, +10]; was 1.0 which flattened
+                                  # all forward-motion steps to the same value and made
+                                  # death penalties negligible, causing policy collapse
             )
             
             # TensorBoard writer -- logs scalars for loss, reward, Q-values, epsilon, actions

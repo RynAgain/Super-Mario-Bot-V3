@@ -303,7 +303,16 @@ class RewardCalculator:
             if self.enhanced_features:
                 components.enhanced_death_penalty = self._calculate_enhanced_death_penalty(current_state)
             else:
-                components.death_penalty = -50.0  # Small penalty, not too harsh
+                # Death penalty scales with distance reached so it always outweighs
+                # the accumulated forward-movement reward.  Without this, the model
+                # learns "run right into death" because 30 steps of +1.0 dwarfs -50.
+                # Formula: base -5.0 plus -0.01 per pixel of max_x_reached.
+                # At x=312 (first pipe): -5.0 + -3.12 = -8.12
+                # At x=1400 (deep run):  -5.0 + -14.0 = -19.0
+                # This ensures death is always a significant negative event relative
+                # to the progress that preceded it.
+                progress_penalty = self.max_x_reached * 0.01
+                components.death_penalty = -(5.0 + progress_penalty)
         
         # Cache terminal detection result BEFORE updating previous_state
         # so that detect_terminal_state() still sees the real previous state

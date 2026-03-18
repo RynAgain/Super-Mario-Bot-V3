@@ -33,7 +33,9 @@ training:
   loss_function: "Huber"          # Loss function ("Huber", "MSE")
   gradient_clipping: 10.0         # Gradient clipping threshold
   gamma: 0.99                     # Discount factor
-  gradient_accumulation_steps: 4  # Accumulate grads over N mini-batches (effective batch = 32*4 = 128)
+  gradient_accumulation_steps: 1  # Was 4 but with short death episodes (~30 steps)
+                                  # the model barely saw diversity per accumulation window,
+                                  # contributing to policy collapse. Set to 1 for now.
   
   # Advanced Training Options
   double_dqn: true                # Enable Double DQN
