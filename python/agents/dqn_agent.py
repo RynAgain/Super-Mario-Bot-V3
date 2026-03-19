@@ -156,11 +156,17 @@ class DQNAgent:
         self.logger.info(f"Networks initialized on device: {self.device}")
     
     def _initialize_replay_buffer(self):
-        """Initialize experience replay buffer."""
+        """Initialize experience replay buffer.
+        
+        IMPORTANT: Buffer is stored on CPU to avoid GPU OOM with large capacities.
+        Each entry is ~220KB (two 4x84x84 float32 frame stacks + vectors).
+        At 50K capacity that's ~11GB RAM -- fine for CPU, fatal for GPU.
+        Sampled batches are moved to GPU in train_step().
+        """
         buffer_config = {
-            'capacity': self.config.get('replay_buffer_size', 20000),  # more stable gradients
-            'device': str(self.device),
-            'frame_stack_size': 4,  # Fixed: changed from 8 to 4 to match model
+            'capacity': self.config.get('replay_buffer_size', 50000),
+            'device': 'cpu',  # Always CPU -- GPU can't hold 50K+ entries (~11GB)
+            'frame_stack_size': 4,
             'frame_size': (84, 84),
             'state_vector_size': 12
         }
@@ -348,10 +354,21 @@ class DQNAgent:
             self.q_network.reset_noise()
             self.target_network.reset_noise()
         
-        # Sample batch from replay buffer
+        # Sample batch from replay buffer (stored on CPU) and move to GPU
         batch = self.replay_buffer.sample(self.batch_size)
         (state_frames, state_vectors, actions, rewards,
          next_state_frames, next_state_vectors, dones, weights, indices) = batch
+        
+        # Move sampled batch to training device (GPU) -- only the small batch
+        # (~128 entries) is transferred, not the entire buffer
+        state_frames = state_frames.to(self.device)
+        state_vectors = state_vectors.to(self.device)
+        actions = actions.to(self.device)
+        rewards = rewards.to(self.device)
+        next_state_frames = next_state_frames.to(self.device)
+        next_state_vectors = next_state_vectors.to(self.device)
+        dones = dones.to(self.device)
+        weights = weights.to(self.device)
         
         accum = self.gradient_accumulation_steps
         
