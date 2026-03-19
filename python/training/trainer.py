@@ -184,9 +184,15 @@ class MarioTrainer:
             agent_config = {**self.config.get('training', {}), **self.config.get('performance', {})}
             self.agent = DQNAgent(agent_config)
             
-            # Initialize reward calculator
+            # Initialize reward calculator with stuck detection config from training section
             reward_config = self.config.get('rewards', {})
-            self.reward_calculator = RewardCalculator(reward_config)
+            stuck_config = {
+                'stuck_timeout_frames': training_config.get('stuck_timeout_frames', 300),
+                'stuck_grace_frames': training_config.get('stuck_grace_frames', 60),
+                'stuck_penalty_per_frame': training_config.get('stuck_penalty_per_frame', -0.1),
+                'stuck_progress_threshold': training_config.get('stuck_progress_threshold', 5),
+            }
+            self.reward_calculator = RewardCalculator(reward_config, stuck_config=stuck_config)
             
             # Initialize episode manager
             self.episode_manager = EpisodeManager(

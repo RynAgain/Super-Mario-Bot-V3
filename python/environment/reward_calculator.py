@@ -93,15 +93,29 @@ class RewardCalculator:
     - Penalties (5%): Death, backward movement, getting stuck
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None, enhanced_features: bool = False):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, enhanced_features: bool = False,
+                 stuck_config: Optional[Dict[str, Any]] = None):
         """
         Initialize reward calculator.
         
         Args:
             config: Reward configuration parameters
             enhanced_features: Whether to use enhanced 20-feature reward calculation
+            stuck_config: Stuck detection parameters from training config
         """
         self.enhanced_features = enhanced_features
+        
+        # Stuck detection configuration (overridable from training_config.yaml)
+        self.stuck_timeout_frames = 300    # default 5s at 60fps
+        self.stuck_grace_frames = 60       # 1s grace before penalty starts
+        self.stuck_penalty_per_frame = -0.1
+        self.stuck_progress_threshold = 5  # pixels needed to reset counter
+        
+        if stuck_config:
+            self.stuck_timeout_frames = stuck_config.get('stuck_timeout_frames', 300)
+            self.stuck_grace_frames = stuck_config.get('stuck_grace_frames', 60)
+            self.stuck_penalty_per_frame = stuck_config.get('stuck_penalty_per_frame', -0.1)
+            self.stuck_progress_threshold = stuck_config.get('stuck_progress_threshold', 5)
         
         # Default configuration
         self.config = {
@@ -324,6 +338,17 @@ class RewardCalculator:
         
         # Update tracking variables
         self._update_stuck_counter(current_x)
+        
+        # ESCALATING STUCK PENALTY: after grace period, apply increasing penalty
+        # so the agent learns to avoid oscillation at obstacles (e.g., pipes at x=722).
+        # Grace period allows short pauses for jumps. Penalty caps to avoid
+        # overwhelming the reward signal.
+        if self.frames_stuck > self.stuck_grace_frames:
+            excess_frames = self.frames_stuck - self.stuck_grace_frames
+            max_penalty_frames = self.stuck_timeout_frames - self.stuck_grace_frames
+            capped_frames = min(excess_frames, max_penalty_frames)
+            components.stuck_penalty = self.stuck_penalty_per_frame * capped_frames
+        
         self.previous_state = current_state.copy()
         
         # Update enhanced state tracking
@@ -475,8 +500,8 @@ class RewardCalculator:
         return 0
     
     def _update_stuck_counter(self, current_x: int):
-        """Update stuck frame counter."""
-        if abs(current_x - self.last_x_position) < 2:  # Less than 2 pixels movement
+        """Update stuck frame counter using configurable progress threshold."""
+        if abs(current_x - self.last_x_position) < self.stuck_progress_threshold:
             self.frames_stuck += 1
         else:
             self.frames_stuck = 0
@@ -589,9 +614,9 @@ class RewardCalculator:
         if time_remaining <= 0:
             return True, "timeout"
         
-        # Stuck for too long -- 1800 frames = 30 seconds at 60 FPS.
-        # Mario needs substantial time to discover pipe jumps through exploration.
-        if self.frames_stuck > 1800:
+        # Stuck for too long -- configurable via stuck_timeout_frames (default 300 = 5s).
+        # Was 1800 (30s) which wasted ~44% of training time on stuck episodes.
+        if self.frames_stuck > self.stuck_timeout_frames:
             return True, "stuck_timeout"
         
         return False, ""

@@ -4,15 +4,15 @@
 training:
   # Core Learning Parameters
   learning_rate: 0.00025          # Adam optimizer learning rate
-  batch_size: 32                  # Training batch size
-  replay_buffer_size: 20000       # Experience replay buffer capacity
+  batch_size: 128                 # Training batch size (was 32 -- GPU was only 15-20% utilized)
+  replay_buffer_size: 200000      # Experience replay buffer capacity (was 20000 -- turned over every ~30min)
   target_update_frequency: 1000   # Target network update interval (steps)
   tau: 0.005                      # Soft target update rate (Polyak averaging)
   
   # Exploration Strategy (Epsilon-Greedy)
   epsilon_start: 1.0              # Initial exploration rate
   epsilon_end: 0.01               # Final exploration rate
-  epsilon_decay: 0.998            # Decay rate PER EPISODE (not per step)
+  epsilon_decay: 0.9995           # Decay rate PER EPISODE (was 0.998 -- hit floor at ep 2300, now ~9200)
   epsilon_decay_type: "exponential" # "exponential" or "linear"
   
   # Frame Skipping
@@ -45,8 +45,14 @@ training:
   
   # C51 Distributional DQN (completes Rainbow: 6/6 components)
   num_atoms: 51                   # Number of atoms for return distribution (1 = standard DQN)
-  v_min: -10.0                    # Minimum return value (should cover worst episode reward)
-  v_max: 10.0                     # Maximum return value (should cover best episode reward)
+  v_min: -30.0                    # Minimum return value (was -10 -- covers death penalty chains with n-step)
+  v_max: 50.0                     # Maximum return value (was 10 -- covers n-step returns from long episodes)
+  
+  # Stuck Detection
+  stuck_timeout_frames: 300       # Frames before stuck termination (was 1800=30s, now 300=5s)
+  stuck_penalty_per_frame: -0.1   # Escalating penalty per frame while stuck (after grace period)
+  stuck_grace_frames: 60          # Frames of no-progress allowed before penalty starts (1s at 60fps)
+  stuck_progress_threshold: 5     # Pixels of x-progress needed to reset stuck counter (was 2)
   
   # Curriculum Learning
   # NOTE: epsilon_override was removed -- it completely blocked the per-episode
