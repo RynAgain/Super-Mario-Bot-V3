@@ -500,11 +500,23 @@ class RewardCalculator:
         return 0
     
     def _update_stuck_counter(self, current_x: int):
-        """Update stuck frame counter using configurable progress threshold."""
-        if abs(current_x - self.last_x_position) < self.stuck_progress_threshold:
-            self.frames_stuck += 1
-        else:
+        """Update stuck frame counter.
+        
+        Resets when Mario reaches a new max_x_reached (new territory) OR
+        when per-frame movement exceeds threshold.  The max_x check is the
+        primary mechanism -- it ensures Mario making overall forward progress
+        is never falsely flagged as stuck, even if individual frame deltas
+        are small (e.g., during jumps, platform edges, or slow walking).
+        """
+        # Primary reset: new max distance reached this frame
+        # max_x_reached is updated in calculate_frame_reward() BEFORE this call
+        if current_x >= self.max_x_reached and current_x > self.last_x_position:
             self.frames_stuck = 0
+        # Secondary reset: large per-frame movement (even in explored territory)
+        elif abs(current_x - self.last_x_position) >= self.stuck_progress_threshold:
+            self.frames_stuck = 0
+        else:
+            self.frames_stuck += 1
         
         self.last_x_position = current_x
     
