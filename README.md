@@ -1,13 +1,13 @@
 # Super Mario Bot V3
 
-An AI training system that teaches a neural network to play Super Mario Bros on NES using the FCEUX emulator. Uses a Dueling DQN with 4-frame stacking, WebSocket communication between Lua and Python, and a distance-based reward system focused on level progression.
+An AI training system that teaches a neural network to play Super Mario Bros on NES using the FCEUX emulator. Uses a full Rainbow DQN (Dueling + Double + C51 Distributional + N-step + NoisyNet + Prioritized Replay) with 4-frame stacking, WebSocket communication between Lua and Python, and a distance-based reward system with stuck detection.
 
 ## System Overview
 
 This project is a 2-part AI system:
 
 1. **Lua Script (FCEUX side)** -- Controls frame progression, reads NES memory, executes controller inputs
-2. **Python Trainer (GPU side)** -- Dueling DQN with experience replay, reward calculation, and episode management
+2. **Python Trainer (GPU side)** -- Rainbow DQN with experience replay, reward calculation, and episode management
 
 ### Architecture
 
@@ -16,33 +16,42 @@ FCEUX (NES Emulator)                    Python Trainer
 +------------------+                    +------------------+
 | mario_ai.lua     |  WebSocket (8765)  | trainer.py       |
 |  - Memory read   | <===============> |  - DQN Agent     |
-|  - Input execute |  128-byte binary   |  - Reward calc   |
+|  - Input execute |  JSON game state   |  - Reward calc   |
 |  - Frame sync    |  + JSON control    |  - Frame capture |
 +------------------+                    +------------------+
 ```
 
 ### Key Features
 
-- **Dueling DQN** with separate value and advantage streams
+- **Rainbow DQN** -- all 6 components of the Rainbow architecture:
+  - Dueling DQN (separate value/advantage streams)
+  - Double DQN (decoupled action selection and evaluation)
+  - C51 Distributional (51-atom return distribution, support [-30, 50])
+  - N-step returns (3-step bootstrapping)
+  - NoisyNet (state-dependent exploration with epsilon floor)
+  - Prioritized Experience Replay
 - **4-frame stacking** for temporal context (84x84 grayscale)
 - **12-action space** matching standard NES controller combinations
-- **WebSocket communication** -- binary payloads for game state, JSON for control
+- **WebSocket communication** -- JSON payloads for game state and control
 - **Frame skipping** -- acts every 4 frames for 4x training speedup
 - **Soft target updates** (Polyak averaging, tau=0.005)
-- **Reward clipping** to [-1, +1] for Q-value stability
-- **Per-episode epsilon decay** (0.998) for balanced exploration
+- **Reward clipping** to [-10, +10] per step for Q-value stability
+- **Per-episode epsilon decay** (0.9995) for extended exploration
+- **Aggressive stuck detection** -- 5-second timeout with escalating penalty
+- **CPU-based replay buffer** -- avoids GPU OOM by storing experiences in RAM
+- **TensorBoard logging** for loss, Q-values, rewards, and action distributions
 
 ## Requirements
 
 ### Software
-- **FCEUX 2.6.4+** -- NES emulator with Lua scripting ([download](http://fceux.com))
+- **FCEUX 2.6.4+** -- NES emulator with Lua scripting (included in `fceux-2.6.6-win64/`)
 - **Python 3.10+** with PyTorch 2.0+ and CUDA support
 - **Super Mario Bros (World).nes** ROM file (user must provide legally)
 
 ### Hardware
-- **GPU**: NVIDIA with 4GB+ VRAM (recommended)
-- **RAM**: 8GB+ system memory
-- **Storage**: 1GB+ free space
+- **GPU**: NVIDIA with 6GB+ VRAM (recommended)
+- **RAM**: 16GB+ system memory (replay buffer uses ~10.5GB on CPU)
+- **Storage**: 2GB+ free space (logs + checkpoints)
 
 ## Quick Start
 
@@ -74,12 +83,23 @@ python python/main.py train
 3. Browse to `lua/mario_ai.lua` and click Run
 4. The script will auto-connect to the Python trainer
 
+Or use the batch file:
+```bash
+run_training.bat
+```
+
 ### 4. Monitor Progress
 
 Watch the Python terminal for log output showing:
 - Episode number and total reward
 - Mario's X position (should increase over time)
 - Epsilon value (exploration rate, decreasing over episodes)
+- Loss and Q-value means (should be non-zero after warmup)
+
+Optional: Monitor with TensorBoard:
+```bash
+tensorboard --logdir runs/
+```
 
 ## Project Structure
 
@@ -96,33 +116,37 @@ Super-Mario-Bot-V3/
 |-- python/
 |   |-- main.py              # CLI entry point
 |   |-- agents/
-|   |   +-- dqn_agent.py     # DQN agent with replay buffer
+|   |   +-- dqn_agent.py     # Rainbow DQN agent
 |   |-- capture/
-|   |   +-- frame_capture.py # Window capture and game state parsing
+|   |   +-- frame_capture.py # Screen capture and game state parsing
 |   |-- communication/
 |   |   |-- websocket_server.py  # WebSocket server
 |   |   +-- comm_manager.py      # Message routing
 |   |-- environment/
-|   |   |-- reward_calculator.py # Reward system
+|   |   |-- reward_calculator.py # Reward system with stuck detection
 |   |   +-- episode_manager.py   # Episode lifecycle
 |   |-- models/
-|   |   +-- dueling_dqn.py      # Dueling DQN network
+|   |   +-- dueling_dqn.py      # Dueling DQN with C51 + NoisyNet
 |   |-- training/
 |   |   |-- trainer.py          # Main training loop
 |   |   +-- training_utils.py   # State management, health monitoring
 |   +-- utils/
 |       |-- preprocessing.py    # Frame stacking, state normalization
-|       |-- replay_buffer.py    # Experience replay
+|       |-- replay_buffer.py    # Prioritized experience replay (CPU-based)
 |       |-- config_loader.py    # YAML config loading
 |       +-- model_utils.py      # Device management, checkpointing
-|-- FEATURE_TRACKER.md      # Prioritized roadmap and progress
+|-- logs/                    # CSV training logs (per-session)
+|-- checkpoints/             # Model checkpoints
+|-- docs/                    # Detailed documentation
+|-- plans/                   # Improvement plans and analysis
+|-- FEATURE_TRACKER.md       # Prioritized roadmap and progress
 |-- pyproject.toml           # Python packaging
 +-- requirements.txt         # Python dependencies
 ```
 
 ## Neural Network
 
-### Dueling DQN (4-frame stack + 12-feature state vector)
+### Rainbow DQN (Dueling + C51 Distributional + NoisyNet)
 
 ```
 Input: 4x84x84 grayscale frames + 12-dim state vector
@@ -134,17 +158,17 @@ Conv2d(64, 64, 3x3, stride=1) -->  ReLU
   |
   v  (flatten + concatenate with state vector)
   |
-Linear(7756, 512)  -->  ReLU  -->  Dropout(0.3)
+NoisyLinear(7756, 512)  -->  ReLU  -->  Dropout(0.3)
   |                                    |
   v                                    v
 Value Stream                   Advantage Stream
-Linear(512, 256) -> ReLU       Linear(512, 256) -> ReLU
-Linear(256, 1)                 Linear(256, 12)
+NoisyLinear(512, 256) -> ReLU  NoisyLinear(512, 256) -> ReLU
+NoisyLinear(256, 51)           NoisyLinear(256, 12*51)
   |                                    |
-  +----------> Q = V + (A - mean(A)) <-+
-  |
+  +--------> Q = V + (A - mean(A)) <---+
+  |          (per-atom combination)
   v
-12 Q-values (one per action)
+12 Q-value distributions (51 atoms each, support [-30, 50])
 ```
 
 ### Action Space
@@ -166,31 +190,40 @@ Linear(256, 1)                 Linear(256, 12)
 
 ## Reward System
 
-Rewards are clipped to [-1, +1] for stable Q-learning.
+Per-step rewards are clipped to [-10, +10]. The C51 distributional network models the full return distribution over support [-30, 50].
 
-| Component | Raw Value | Description |
-|-----------|-----------|-------------|
+| Component | Value | Description |
+|-----------|-------|-------------|
 | New max distance | +1.0/pixel | First time reaching a new X position |
 | Rightward movement | +0.1/pixel | Any rightward movement (even revisiting) |
-| Backward movement | -0.05/pixel | Moving left |
-| Death | -50.0 | Losing a life |
-| Level complete | +1000.0 | Reaching the flagpole |
+| Backward movement | -0.1/pixel | Moving left (net zero for oscillation) |
+| Death penalty | -(5 + 0.01 * max_x) | Scales with progress to always outweigh gains |
+| Stuck penalty | -0.1/frame | Escalating after 1s grace period, up to -24 |
+| Stuck termination | 5 seconds | Episode ends after 300 frames without progress |
+| Level complete | +1000 | Reaching the flagpole |
 
 ## Training Parameters
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
 | Learning rate | 0.00025 | Adam optimizer |
-| Batch size | 32 | From replay buffer |
-| Replay buffer | 20,000 | Circular buffer |
+| Batch size | 128 | Transferred from CPU replay to GPU per step |
+| Replay buffer | 50,000 | CPU-based (10.5GB RAM), 2.5x original |
 | Gamma (discount) | 0.99 | Future reward weight |
+| N-step returns | 3 | Multi-step bootstrapping |
 | Epsilon start | 1.0 | Full exploration |
 | Epsilon end | 0.01 | Minimal exploration |
-| Epsilon decay | 0.998/episode | ~1500 episodes to reach 0.05 |
+| Epsilon decay | 0.9995/episode | Reaches floor at ~9,200 episodes |
+| NoisyNet floor | 5% | Minimum random action rate |
 | Frame skip | 4 | Act every 4 frames |
 | Target update | Polyak tau=0.005 | Soft update every training step |
 | Warmup | 50 episodes | Random actions before learning |
-| Reward clip | [-1, +1] | Q-value stability |
+| Reward clip | [-10, +10] | Per-step clipping |
+| C51 atoms | 51 | Return distribution resolution |
+| C51 support | [-30, 50] | Min/max return range |
+| Stuck timeout | 300 frames (5s) | Episode termination |
+| Stuck grace | 60 frames (1s) | Before penalty starts |
+| Gradient clip | 10.0 | Max gradient norm |
 
 ## Configuration
 
@@ -198,7 +231,21 @@ Edit [`config/training_config.yaml`](config/training_config.yaml) for:
 - Learning rates, batch sizes, exploration parameters
 - WebSocket host/port settings
 - Frame skip and target update settings
-- Curriculum learning phases
+- Stuck detection thresholds
+- C51 distributional parameters (v_min, v_max, num_atoms)
+
+### Memory Tuning
+
+The replay buffer pre-allocates all storage at initialization. Each entry uses ~220KB (two 4x84x84 float32 frame stacks). The buffer is stored on **CPU RAM** to avoid GPU OOM.
+
+| Buffer Size | RAM Usage | Holds ~N Episodes |
+|-------------|-----------|-------------------|
+| 20,000 | 4.2 GB | ~133 episodes |
+| 30,000 | 6.3 GB | ~200 episodes |
+| **50,000** | **10.5 GB** | **~333 episodes** |
+| 100,000 | 21.0 GB | ~667 episodes |
+
+Reduce `replay_buffer_size` in `training_config.yaml` if your system has limited RAM.
 
 ## Troubleshooting
 
@@ -213,8 +260,18 @@ Edit [`config/training_config.yaml`](config/training_config.yaml) for:
 - Enable debug logging: `python python/main.py train --log-level DEBUG`
 
 ### GPU Out of Memory
-- Reduce `replay_buffer_size` in `training_config.yaml` (try 10000)
-- Reduce `batch_size` (try 16)
+- The replay buffer is stored on CPU by default -- GPU OOM is unlikely unless running other programs
+- If GPU OOM during training, reduce `batch_size` (try 64 or 32)
+- Check GPU memory with `nvidia-smi`
+
+### High RAM Usage
+- The replay buffer uses ~10.5GB RAM at the default 50K capacity
+- Reduce `replay_buffer_size` to 30000 (6.3GB) or 20000 (4.2GB)
+
+### Training Plateaus
+- Check the training logs for stuck_timeout episodes consuming too much time
+- Review `docs/TRAINING_ANALYSIS_20260317_225242.md` for analysis methodology
+- Ensure epsilon hasn't reached the floor too early (check epsilon in logs)
 
 ## Documentation
 
@@ -231,6 +288,10 @@ Detailed docs available in [`docs/`](docs/):
 - [Memory Addresses](docs/memory-addresses.md)
 - [Reward System](docs/reward-system.md)
 - [Neural Network](docs/neural-network-architecture.md)
+- [Training Analysis](docs/TRAINING_ANALYSIS_20260317_225242.md)
+
+Improvement plans in [`plans/`](plans/):
+- [Training Improvements v4](plans/training-improvements-v4.md)
 
 ## License
 
