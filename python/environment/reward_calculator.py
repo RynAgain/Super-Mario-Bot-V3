@@ -339,15 +339,13 @@ class RewardCalculator:
         # Update tracking variables
         self._update_stuck_counter(current_x)
         
-        # ESCALATING STUCK PENALTY: after grace period, apply increasing penalty
+        # FLAT STUCK PENALTY: after grace period, apply a constant per-frame penalty
         # so the agent learns to avoid oscillation at obstacles (e.g., pipes at x=722).
-        # Grace period allows short pauses for jumps. Penalty caps to avoid
-        # overwhelming the reward signal.
+        # Grace period allows short pauses for jumps.
+        # Total penalty over a full stuck episode: -0.1 * 240 frames = -24.0
+        # (Previous escalating version accumulated ~-2900 which overwhelmed all signals)
         if self.frames_stuck > self.stuck_grace_frames:
-            excess_frames = self.frames_stuck - self.stuck_grace_frames
-            max_penalty_frames = self.stuck_timeout_frames - self.stuck_grace_frames
-            capped_frames = min(excess_frames, max_penalty_frames)
-            components.stuck_penalty = self.stuck_penalty_per_frame * capped_frames
+            components.stuck_penalty = self.stuck_penalty_per_frame  # flat -0.1 per frame
         
         self.previous_state = current_state.copy()
         

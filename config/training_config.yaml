@@ -107,8 +107,8 @@ network:
   frame_size: [84, 84]            # Frame dimensions (height, width)
   
   # State Vector Configuration
-  state_vector_size: 12           # Game state vector size (12 or 20)
-  enhanced_features: false        # Enable enhanced 20-feature mode
+  state_vector_size: 20           # Game state vector size (was 12 -- expanded for hazard awareness)
+  enhanced_features: true         # Enable enhanced 20-feature mode with enemy/terrain data
   
   # Action Space
   num_actions: 12                 # Number of possible actions

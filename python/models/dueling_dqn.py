@@ -399,7 +399,7 @@ class DuelingDQNConfig:
     def __init__(self):
         # Network architecture
         self.num_actions = 12
-        self.state_vector_size = 12
+        self.state_vector_size = 20  # was 12 -- expanded for enemy/terrain features
         self.frame_stack_size = 4
         self.frame_size = (84, 84)
         self.noisy = True              # Enable NoisyNet for exploration

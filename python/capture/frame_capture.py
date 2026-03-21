@@ -759,21 +759,33 @@ class FrameCapture:
                 self.logger.warning(f"Frame shape mismatch: got {frames.shape}, expected {expected_shape}")
                 frames = np.zeros(expected_shape, dtype=np.float32)
             
-            # Create state vector from game state (12 elements to match DQN model)
+            # Create state vector from game state (20 elements for enhanced DQN model)
+            # Features 0-11: Core Mario state  |  Features 12-19: Hazard awareness
             # All features normalized to approximately [0, 1] or [-1, 1] range
+            power_state = game_state.get('powerup', 0)
             state_vector = np.array([
-                game_state.get('mario_x', 0) / 3168.0,             # X position (World 1-1 length)
-                game_state.get('mario_y', 0) / 240.0,              # Y position (screen height)
-                game_state.get('mario_x_vel', 0) / 40.0,           # X velocity (signed, typical range -40 to 40)
-                game_state.get('mario_y_vel', 0) / 40.0,           # Y velocity (signed, typical range -40 to 40)
-                game_state.get('lives', 3) / 5.0,                  # Lives (max ~5)
-                game_state.get('powerup', 0) / 2.0,                # Power state (0=small, 1=big, 2=fire)
-                game_state.get('time', 400) / 400.0,               # Timer
-                game_state.get('coins', 0) / 99.0,                 # Coins (max 99)
-                game_state.get('score', 0) / 100000.0,             # Score
-                float(game_state.get('world', 1)) / 8.0,           # World number
-                float(game_state.get('level', 1)) / 4.0,           # Level number
-                float(game_state.get('mario_state', 0)) / 11.0,    # Player state byte
+                # Core Mario state (0-11)
+                game_state.get('mario_x', 0) / 3168.0,                          # 0: X position
+                game_state.get('mario_y', 0) / 240.0,                           # 1: Y position
+                game_state.get('mario_x_vel', 0) / 40.0,                        # 2: X velocity
+                game_state.get('mario_y_vel', 0) / 40.0,                        # 3: Y velocity
+                1.0 if power_state == 0 else 0.0,                               # 4: Small Mario
+                1.0 if power_state == 1 else 0.0,                               # 5: Big Mario
+                1.0 if power_state == 2 else 0.0,                               # 6: Fire Mario
+                float(game_state.get('on_ground', 0)),                           # 7: On ground
+                float(game_state.get('direction', 0)),                           # 8: Facing direction
+                game_state.get('lives', 3) / 5.0,                               # 9: Lives
+                float(game_state.get('invincible', 0) > 0),                      # 10: Invincible
+                game_state.get('time', 400) / 400.0,                             # 11: Time remaining
+                # Hazard awareness (12-19)
+                min(game_state.get('closest_enemy_distance', 999.0) / 500.0, 1.0),  # 12: Nearest enemy
+                min(game_state.get('enemy_count', 0) / 5.0, 1.0),                   # 13: Enemy count
+                min(game_state.get('threats_ahead', 0) / 3.0, 1.0),                 # 14: Threats ahead
+                min(game_state.get('threats_behind', 0) / 3.0, 1.0),                # 15: Threats behind
+                float(game_state.get('pit_detected', False)),                        # 16: Pit ahead
+                min(game_state.get('solid_tiles_ahead', 0) / 10.0, 1.0),            # 17: Obstacles ahead
+                float(game_state.get('powerup_present', False)),                     # 18: Power-up on screen
+                min(game_state.get('velocity_magnitude', 0.0) / 180.0, 1.0),        # 19: Overall speed
             ], dtype=np.float32)
             
             # Ensure state vector has correct shape
@@ -787,7 +799,7 @@ class FrameCapture:
             self.logger.error(f"Game state keys: {list(game_state.keys()) if game_state else 'None'}")
             # Return default values
             default_frames = np.zeros((*self.preprocessor.target_size, self.frame_stack_size), dtype=np.float32)
-            default_state = np.zeros(12, dtype=np.float32)
+            default_state = np.zeros(20, dtype=np.float32)
             return default_frames, default_state
     
     def reset_stats(self):

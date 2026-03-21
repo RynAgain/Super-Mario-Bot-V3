@@ -1752,6 +1752,23 @@ local function send_game_state(game_state)
     local score = game_state.score or {}
     local threats = game_state.threat_assessment or {}
 
+    -- Compute pit/solid tile counts from level_tiles (if tile sampling enabled)
+    local pit_detected = false
+    local solid_tiles_ahead = 0
+    if game_state.level_tiles then
+        for key, tile in pairs(game_state.level_tiles) do
+            if tile.x_offset and tile.x_offset >= 1 and tile.x_offset <= 3 then
+                -- Tiles ahead of Mario (right side)
+                if tile.is_solid then
+                    solid_tiles_ahead = solid_tiles_ahead + 1
+                elseif tile.y_offset and tile.y_offset >= 1 and not tile.is_solid then
+                    -- Empty tile below and ahead = potential pit
+                    pit_detected = true
+                end
+            end
+        end
+    end
+
     -- Flatten to a simple JSON object -- no nested tables
     local parts = {
         '"type":"game_state"',
@@ -1776,9 +1793,21 @@ local function send_game_state(game_state)
         '"is_dead":' .. (game_state.is_dead and "true" or "false"),
         '"is_level_complete":' .. (game_state.is_level_complete and "true" or "false"),
         '"level_progress":' .. string.format("%.4f", game_state.level_progress or 0),
-        -- Threat assessment (optional enrichment)
+        -- Enhanced state vector features for hazard avoidance (20-feature mode)
         '"threat_count":' .. (threats.threat_count or 0),
-        '"nearest_threat_distance":' .. (threats.nearest_threat_distance or 999)
+        '"nearest_threat_distance":' .. (threats.nearest_threat_distance or 999),
+        '"threats_ahead":' .. (threats.threats_ahead or 0),
+        '"threats_behind":' .. (threats.threats_behind or 0),
+        '"closest_enemy_dist":' .. (threats.closest_distance or 999),
+        -- Terrain awareness
+        '"on_ground":' .. ((mario.y_velocity == 0) and 1 or 0),
+        '"direction":' .. (mario.direction or 0),
+        '"invincible":' .. (mario.invincibility_timer or 0),
+        -- Power-up on screen
+        '"powerup_present":' .. ((game_state.powerup and game_state.powerup.is_active) and "true" or "false"),
+        -- Pit / solid tile detection (from level_tiles if available)
+        '"pit_detected":' .. (pit_detected and "true" or "false"),
+        '"solid_tiles_ahead":' .. solid_tiles_ahead
     }
 
     local json_text = "{" .. table.concat(parts, ",") .. "}"

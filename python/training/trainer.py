@@ -106,6 +106,9 @@ class MarioTrainer:
         self.last_fps_update = time.time()
         self.current_fps = 0.0
         
+        # All-time session max fitness -- tracks the furthest Mario has ever reached
+        self._session_max_x = 0
+        
         # Action distribution tracking per episode
         self._episode_action_counts: Counter = Counter()
         
@@ -585,9 +588,23 @@ class MarioTrainer:
                 action_stats=action_stats
             )
         
+        # Update all-time session max fitness
+        if max_distance > self._session_max_x:
+            self._session_max_x = max_distance
+            self.logger.info(
+                f"*** NEW SESSION BEST: x={self._session_max_x} "
+                f"({self._session_max_x / 3168.0 * 100:.1f}% of 1-1) ***"
+            )
+        
+        # TensorBoard: all-time max fitness
+        if self.tb_writer is not None:
+            ep = self.current_episode + 1
+            self.tb_writer.add_scalar("session/max_x_ever", self._session_max_x, ep)
+        
         self.logger.info(
             f"Episode {self.current_episode + 1} completed: "
             f"Reward={total_reward:.1f}, Distance={max_distance}, "
+            f"MAX={self._session_max_x}, "
             f"Duration={episode_duration:.1f}s, Completed={completed}"
         )
     
@@ -603,11 +620,13 @@ class MarioTrainer:
         """
         frame_id = data.get('frame_id', 0)
         # The JSON dict IS the game state -- no binary parsing needed
+        mario_x_vel = data.get('mario_x_vel', 0)
+        mario_y_vel = data.get('mario_y_vel', 0)
         game_state = {
             'mario_x': data.get('mario_x', 0),
             'mario_y': data.get('mario_y', 0),
-            'mario_x_vel': data.get('mario_x_vel', 0),
-            'mario_y_vel': data.get('mario_y_vel', 0),
+            'mario_x_vel': mario_x_vel,
+            'mario_y_vel': mario_y_vel,
             'mario_state': data.get('mario_state', 0),
             'powerup': data.get('powerup', 0),
             'power_state': data.get('powerup', 0),
@@ -618,6 +637,19 @@ class MarioTrainer:
             'score': data.get('score', 0),
             'coins': data.get('coins', 0),
             'timestamp': data.get('timestamp', time.time()),
+            # Enhanced features for 20-feature state vector (hazard avoidance)
+            'on_ground': data.get('on_ground', 0),
+            'direction': data.get('direction', 0),
+            'invincible': data.get('invincible', 0),
+            'closest_enemy_distance': data.get('closest_enemy_dist', 999.0),
+            'enemy_count': data.get('threat_count', 0),
+            'threats_ahead': data.get('threats_ahead', 0),
+            'threats_behind': data.get('threats_behind', 0),
+            'pit_detected': data.get('pit_detected', False),
+            'solid_tiles_ahead': data.get('solid_tiles_ahead', 0),
+            'powerup_present': data.get('powerup_present', False),
+            'velocity_magnitude': (mario_x_vel**2 + mario_y_vel**2)**0.5,
+            'facing_direction': data.get('direction', 1),
         }
         await self._process_game_state_dict(frame_id, game_state)
     
@@ -846,7 +878,8 @@ class MarioTrainer:
             if self.current_step % 100 == 0:
                 self.logger.info(f"Episode {self.current_episode + 1}, Step {self.current_step}: "
                                f"Reward={frame_reward:.2f}, Total={self.episode_manager.current_episode.total_reward:.2f}, "
-                               f"Mario X={game_state.get('mario_x', 0)}, Action={action_id}")
+                               f"Mario X={game_state.get('mario_x', 0)}, "
+                               f"MAX={self._session_max_x}, Action={action_id}")
             
         except Exception as e:
             # Throttled error logging -- prevents flooding logs when an error repeats
@@ -907,7 +940,7 @@ class MarioTrainer:
                 )
         
         # Validate state vector shape
-        expected_state_size = 12  # Standard game state vector size
+        expected_state_size = 20  # Enhanced game state vector size (was 12)
         if len(state_vector.shape) == 2:
             actual_state_size = state_vector.shape[1]  # (batch, features)
         else:

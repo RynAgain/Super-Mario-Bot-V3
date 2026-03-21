@@ -168,7 +168,7 @@ class DQNAgent:
             'device': 'cpu',  # Always CPU -- GPU can't hold 50K+ entries (~11GB)
             'frame_stack_size': 4,
             'frame_size': (84, 84),
-            'state_vector_size': 12
+            'state_vector_size': 20  # was 12 -- expanded for enemy/terrain features
         }
         
         if self.prioritized_replay:
