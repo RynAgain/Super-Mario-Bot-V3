@@ -109,6 +109,15 @@ class MarioTrainer:
         # All-time session max fitness -- tracks the furthest Mario has ever reached
         self._session_max_x = 0
         
+        # Quality gate state -- only train on episodes above adaptive fitness threshold
+        self._quality_gate_enabled = True
+        self._qualifying_distances: List[int] = []  # rolling window of qualifying max_x
+        self._quality_gate_config: Dict[str, Any] = {}  # loaded from config in _initialize_subsystems
+        self._qualifying_episode_count = 0
+        self._filtered_episode_count = 0
+        self._episode_transitions: List[tuple] = []  # deferred buffer for current episode
+        self._episode_did_train = False  # whether this episode had training steps
+        
         # Action distribution tracking per episode
         self._episode_action_counts: Counter = Counter()
         
@@ -239,6 +248,20 @@ class MarioTrainer:
                 self.session_id, 
                 self.config.get('training', {})
             )
+            
+            # Load quality gate configuration
+            qg = training_config.get('quality_gate', {})
+            self._quality_gate_enabled = qg.get('enabled', True)
+            self._quality_gate_config = {
+                'percentile': qg.get('percentile', 25),
+                'window_size': qg.get('window_size', 100),
+                'min_qualifying': qg.get('min_qualifying', 20),
+                'warmup_bypass': qg.get('warmup_bypass_episodes', 50),
+                'floor_x': qg.get('floor_x', 200),
+                'frontier_ratio': qg.get('frontier_ratio', 0.8),
+                'periodic_every': qg.get('periodic_qualify_every', 20),
+            }
+            self.logger.info(f"Quality gate {'enabled' if self._quality_gate_enabled else 'disabled'}: {self._quality_gate_config}")
             
             self.logger.info("All subsystems initialized successfully")
             
@@ -491,6 +514,8 @@ class MarioTrainer:
         self.frame_times.clear()
         self.processing_times.clear()
         self._episode_action_counts.clear()
+        self._episode_transitions.clear()  # Clear deferred transition buffer
+        self._episode_did_train = False
         
         # Update state manager
         self.state_manager.update_episode_start(self.current_episode + 1)
@@ -507,10 +532,7 @@ class MarioTrainer:
         max_distance = episode_stats.max_x_reached
         completed = episode_stats.level_completed
         
-        # Update agent episode end
-        self.agent.episode_end(total_reward, episode_stats.frames_processed)
-        
-        # End episode in episode manager
+        # End episode in episode manager (always -- for CSV logging)
         episode_data = {
             'final_score': episode_stats.score,
             'time_remaining': episode_stats.time_remaining,
@@ -521,12 +543,59 @@ class MarioTrainer:
         
         completed_episode = self.episode_manager.end_episode(episode_data)
         
-        # Update state manager
+        # --- QUALITY GATE CHECK ---
+        episode_qualifies = self._check_quality_gate(max_distance)
+        
+        if episode_qualifies:
+            # COMMIT: Store all buffered transitions in replay buffer
+            for transition in self._episode_transitions:
+                pf, ps, aid, rew, nf, ns, done = transition
+                self.agent.store_experience(
+                    pf.to(self.agent.device), ps.to(self.agent.device),
+                    aid, rew,
+                    nf.to(self.agent.device), ns.to(self.agent.device),
+                    done
+                )
+            
+            # Run training steps proportional to transitions committed
+            train_count = max(1, len(self._episode_transitions) // 4)  # 1 train per 4 transitions
+            for _ in range(train_count):
+                if self.training_phase != TrainingPhase.WARMUP:
+                    metrics = self.agent.train_step()
+                    if metrics and self.tb_writer is not None:
+                        gs = self.agent.training_step
+                        self.tb_writer.add_scalar("train/loss", metrics.get('loss', 0), gs)
+                        self.tb_writer.add_scalar("train/mean_q_value", metrics.get('mean_q_value', 0), gs)
+                        self.tb_writer.add_scalar("train/epsilon", metrics.get('epsilon', 0), gs)
+            
+            # Decay epsilon only for qualifying episodes
+            self.agent.episode_end(total_reward, episode_stats.frames_processed)
+            
+            # Update qualifying episode window
+            self._qualifying_distances.append(max_distance)
+            qg = self._quality_gate_config
+            if len(self._qualifying_distances) > qg.get('window_size', 100):
+                self._qualifying_distances.pop(0)
+            self._qualifying_episode_count += 1
+            
+            self.logger.info(f"  [QUALIFIED] ep {self.current_episode + 1}: "
+                           f"x={max_distance}, threshold={self._get_quality_threshold()}, "
+                           f"transitions={len(self._episode_transitions)}")
+        else:
+            # DISCARD: Don't store transitions, don't train, don't decay epsilon
+            self._filtered_episode_count += 1
+            self.logger.info(f"  [FILTERED] ep {self.current_episode + 1}: "
+                           f"x={max_distance} < threshold={self._get_quality_threshold()}")
+        
+        # Clear deferred buffer
+        self._episode_transitions.clear()
+        
+        # Update state manager (always, for stats tracking)
         self.state_manager.update_episode_end(
             total_reward, max_distance, episode_duration, completed
         )
         
-        # Log episode summary to CSV
+        # Log episode summary to CSV (always, even filtered episodes)
         if completed_episode:
             # Get Q-value statistics from agent
             agent_stats = self.agent.get_stats()
@@ -777,39 +846,33 @@ class MarioTrainer:
             else:
                 self.logger.warning(f"Failed to send action {action_id} for frame {frame_id} - connection may be lost")
             
-            # Store experience in replay buffer
+            # QUALITY GATE: Buffer transitions instead of storing directly.
+            # Transitions are committed or discarded in _end_episode() based on
+            # whether the episode meets the adaptive fitness threshold.
             if hasattr(self, 'previous_frames') and hasattr(self, 'previous_state_vector'):
-                # Ensure previous tensors are on the correct device and have correct format
-                prev_frames = self.previous_frames.to(self.agent.device) if hasattr(self.previous_frames, 'to') else self.previous_frames
-                prev_state = self.previous_state_vector.to(self.agent.device) if hasattr(self.previous_state_vector, 'to') else self.previous_state_vector
+                prev_frames = self.previous_frames
+                prev_state = self.previous_state_vector
                 
-                # Ensure previous frames are also in channels-first format
+                # Ensure previous frames are in channels-first format
                 if hasattr(prev_frames, 'shape') and len(prev_frames.shape) == 4 and prev_frames.shape[-1] == 4:
-                    # If channels are last, transpose to channels-first
                     prev_frames = prev_frames.permute(0, 3, 1, 2)
                 
-                self.agent.store_experience(
-                    prev_frames,
-                    prev_state,
+                # Buffer the transition -- will be committed or discarded at episode end
+                self._episode_transitions.append((
+                    prev_frames.cpu(),
+                    prev_state.cpu(),
                     self.previous_action_id,
                     frame_reward,
-                    frames,
-                    state_vector,
+                    frames.cpu(),
+                    state_vector.cpu(),
                     is_terminal
-                )
+                ))
             
-            # Train agent if enough experience
+            # Training steps are deferred until we know if the episode qualifies.
+            # We still need to run train_step() during warmup to fill the buffer
+            # and during qualifying episodes (handled in _end_episode).
+            # For now, skip per-frame training -- it will be done in batch at episode end.
             training_metrics = {}
-            if self.training_phase != TrainingPhase.WARMUP:
-                training_metrics = self.agent.train_step()
-                
-                # TensorBoard step-level logging (every train step that returns data)
-                if training_metrics and self.tb_writer is not None:
-                    gs = self.agent.training_step  # global training step
-                    self.tb_writer.add_scalar("train/loss", training_metrics.get('loss', 0), gs)
-                    self.tb_writer.add_scalar("train/mean_q_value", training_metrics.get('mean_q_value', 0), gs)
-                    self.tb_writer.add_scalar("train/epsilon", training_metrics.get('epsilon', 0), gs)
-                    self.tb_writer.add_scalar("train/learning_rate", self.agent.learning_rate, gs)
             
             # Update state for next step
             self.previous_frames = frames
@@ -1087,6 +1150,57 @@ class MarioTrainer:
                     
                     self.training_state.curriculum_phase = phase_name
                     break
+    
+    def _get_quality_threshold(self) -> int:
+        """Calculate the current quality gate threshold from qualifying episode history."""
+        qg = self._quality_gate_config
+        
+        if not self._quality_gate_enabled:
+            return 0
+        
+        # Not enough data yet -- use floor
+        if len(self._qualifying_distances) < qg.get('min_qualifying', 20):
+            return qg.get('floor_x', 200)
+        
+        # Calculate percentile of qualifying distances
+        percentile = qg.get('percentile', 25)
+        threshold = int(np.percentile(self._qualifying_distances, percentile))
+        
+        # Enforce floor
+        return max(threshold, qg.get('floor_x', 200))
+    
+    def _check_quality_gate(self, max_x: int) -> bool:
+        """
+        Check if an episode qualifies for training.
+        
+        Returns True if the episode should be committed to the replay buffer
+        and used for training. Returns False if it should be discarded.
+        """
+        if not self._quality_gate_enabled:
+            return True
+        
+        qg = self._quality_gate_config
+        
+        # Override 1: Warmup episodes always qualify
+        if self.current_episode < qg.get('warmup_bypass', 50):
+            return True
+        
+        # Override 2: Not enough qualifying episodes yet (cold start)
+        if len(self._qualifying_distances) < qg.get('min_qualifying', 20):
+            return True
+        
+        # Override 3: Reached near-frontier territory
+        if self._session_max_x > 0 and max_x >= self._session_max_x * qg.get('frontier_ratio', 0.8):
+            return True
+        
+        # Override 4: Periodic always-qualify (maintains negative learning signal)
+        periodic = qg.get('periodic_every', 20)
+        if periodic > 0 and (self.current_episode + 1) % periodic == 0:
+            return True
+        
+        # Standard check: must exceed threshold
+        threshold = self._get_quality_threshold()
+        return max_x >= threshold
     
     def _should_log_error(self, error_key: str) -> bool:
         """

@@ -59,6 +59,17 @@ training:
   # NOTE: epsilon_override was removed -- it completely blocked the per-episode
   # epsilon decay, locking epsilon at 0.8 for the first 10k episodes.
   # Epsilon is now controlled solely by epsilon_decay (0.998 per episode).
+  # Quality-Gated Training -- only train on episodes above a rising fitness threshold
+  quality_gate:
+    enabled: true
+    percentile: 25                # Threshold = this percentile of qualifying episodes' max_x
+    window_size: 100              # Rolling window of qualifying episode distances
+    min_qualifying: 20            # Minimum qualifying episodes before gate activates
+    warmup_bypass_episodes: 50    # Always qualify during warmup
+    floor_x: 200                  # Absolute minimum threshold (always qualify above this)
+    frontier_ratio: 0.8           # Qualify if max_x >= session_best * ratio
+    periodic_qualify_every: 20    # Every Nth episode always qualifies (maintains negative signal)
+  
   curriculum:
     enabled: false                  # Disabled until we have a working baseline
     phases:
