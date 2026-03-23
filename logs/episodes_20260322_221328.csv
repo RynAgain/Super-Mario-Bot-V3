@@ -1,0 +1,1 @@
+timestamp,episode,duration_seconds,total_steps,total_reward,mario_x_final,mario_x_max,level_completed,death_cause,lives_remaining,score,coins_collected,enemies_killed,powerups_collected,time_remaining,completion_percentage,average_reward_per_step,max_q_value,min_q_value,exploration_actions,exploitation_actions
