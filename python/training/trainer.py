@@ -117,6 +117,7 @@ class MarioTrainer:
         self._filtered_episode_count = 0
         self._episode_transitions: List[tuple] = []  # deferred buffer for current episode
         self._episode_did_train = False  # whether this episode had training steps
+        self._latest_training_metrics = {}  # latest metrics from agent.train_step() for CSV logging
         
         # Action distribution tracking per episode
         self._episode_action_counts: Counter = Counter()
@@ -565,11 +566,13 @@ class MarioTrainer:
             for _ in range(train_count):
                 if self.training_phase != TrainingPhase.WARMUP:
                     metrics = self.agent.train_step()
-                    if metrics and self.tb_writer is not None:
-                        gs = self.agent.training_step
-                        self.tb_writer.add_scalar("train/loss", metrics.get('loss', 0), gs)
-                        self.tb_writer.add_scalar("train/mean_q_value", metrics.get('mean_q_value', 0), gs)
-                        self.tb_writer.add_scalar("train/epsilon", metrics.get('epsilon', 0), gs)
+                    if metrics:
+                        self._latest_training_metrics = metrics
+                        if self.tb_writer is not None:
+                            gs = self.agent.training_step
+                            self.tb_writer.add_scalar("train/loss", metrics.get('loss', 0), gs)
+                            self.tb_writer.add_scalar("train/mean_q_value", metrics.get('mean_q_value', 0), gs)
+                            self.tb_writer.add_scalar("train/epsilon", metrics.get('epsilon', 0), gs)
             
             # Decay epsilon only for qualifying episodes
             self.agent.episode_end(total_reward, episode_stats.frames_processed)
@@ -601,10 +604,9 @@ class MarioTrainer:
         # Log episode summary to CSV (always, even filtered episodes)
         if completed_episode:
             # Get Q-value statistics from agent
-            agent_stats = self.agent.get_stats()
             q_value_stats = {
-                'max': agent_stats.get('episode_reward_max', 0.0),
-                'min': agent_stats.get('episode_reward_min', 0.0)
+                'max': self._latest_training_metrics.get('mean_q_value', 0.0),
+                'min': self._latest_training_metrics.get('mean_q_value', 0.0)
             }
             
             # Get action statistics from actual counts
@@ -878,7 +880,7 @@ class MarioTrainer:
             # We still need to run train_step() during warmup to fill the buffer
             # and during qualifying episodes (handled in _end_episode).
             # For now, skip per-frame training -- it will be done in batch at episode end.
-            training_metrics = {}
+            training_metrics = self._latest_training_metrics
             
             # Update state for next step
             self.previous_frames = frames
