@@ -71,6 +71,32 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None):
     logging.getLogger("PIL").setLevel(logging.WARNING)
 
 
+def find_latest_checkpoint(checkpoint_dir: str = "checkpoints") -> Optional[str]:
+    """
+    Find the most recent checkpoint file in the checkpoint directory.
+    
+    Scans for checkpoint_*.pt files and returns the one with the newest
+    modification time.
+    
+    Args:
+        checkpoint_dir: Directory to search for checkpoints
+        
+    Returns:
+        Path to the latest checkpoint file, or None if no checkpoints found
+    """
+    checkpoint_path = Path(checkpoint_dir)
+    if not checkpoint_path.exists():
+        return None
+    
+    checkpoint_files = list(checkpoint_path.glob("checkpoint_*.pt"))
+    if not checkpoint_files:
+        return None
+    
+    # Sort by modification time, newest first
+    latest = max(checkpoint_files, key=lambda p: p.stat().st_mtime)
+    return str(latest)
+
+
 async def start_training(args):
     """
     Start training session.
@@ -94,8 +120,18 @@ async def start_training(args):
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         
+        # Determine checkpoint to resume from
+        resume_checkpoint = None
+        if hasattr(args, 'resume') and args.resume:
+            resume_checkpoint = args.resume
+        elif hasattr(args, 'resume_latest') and args.resume_latest:
+            resume_checkpoint = find_latest_checkpoint()
+            if resume_checkpoint:
+                logger.info(f"Auto-resume: found latest checkpoint -> {resume_checkpoint}")
+            else:
+                logger.info("Auto-resume: no checkpoints found, starting fresh")
+        
         # Start training
-        resume_checkpoint = args.resume if hasattr(args, 'resume') else None
         await trainer.start_training(resume_from_checkpoint=resume_checkpoint)
         
         logger.info("Training completed successfully")
@@ -395,8 +431,9 @@ def main():
         epilog="""
 Examples:
   python main.py train                          # Start new training session
+  python main.py train --resume-latest          # Resume from most recent checkpoint
   python main.py train --config custom.yaml    # Use custom configuration
-  python main.py resume --checkpoint path.pt   # Resume from checkpoint
+  python main.py resume --checkpoint path.pt   # Resume from specific checkpoint
   python main.py status                         # Show training status
   python main.py sessions                       # List training sessions
   python main.py analyze                        # Create analysis plots
@@ -426,6 +463,12 @@ Examples:
     train_parser.add_argument(
         "--config",
         help="Configuration file path (default: config/training_config.yaml)"
+    )
+    train_parser.add_argument(
+        "--resume-latest",
+        action="store_true",
+        default=False,
+        help="Auto-resume from the most recent checkpoint in checkpoints/"
     )
     
     # Resume command
