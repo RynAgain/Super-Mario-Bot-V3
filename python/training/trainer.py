@@ -545,6 +545,9 @@ class MarioTrainer:
         
         # --- QUALITY GATE CHECK ---
         episode_qualifies = self._check_quality_gate(max_distance)
+        # Always qualify level completions -- never discard a victory
+        if completed:
+            episode_qualifies = True
         
         if episode_qualifies:
             # COMMIT: Store all buffered transitions in replay buffer
@@ -719,6 +722,9 @@ class MarioTrainer:
             'powerup_present': data.get('powerup_present', False),
             'velocity_magnitude': (mario_x_vel**2 + mario_y_vel**2)**0.5,
             'facing_direction': data.get('direction', 1),
+            'is_level_complete': data.get('is_level_complete', False),
+            'is_dead': data.get('is_dead', False),
+            'level_progress': data.get('level_progress', 0.0),
         }
         await self._process_game_state_dict(frame_id, game_state)
     

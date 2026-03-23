@@ -262,6 +262,7 @@ class RewardCalculator:
         # Reset terminal state cache
         self._cached_terminal = None
         self._cached_terminal_reason = ""
+        self._level_complete_detected = False
         
         # Reset enhanced state tracking
         if self.enhanced_features:
@@ -379,7 +380,7 @@ class RewardCalculator:
         
         # Big bonus for level completion
         if episode_data.get('level_completed', False):
-            components.completion_reward = 1000.0  # Large completion bonus
+            components.completion_reward = 5000.0  # Massive completion bonus - must dwarf all other rewards
         
         # Simple total reward
         total_reward = components.distance_reward + components.completion_reward
@@ -506,6 +507,11 @@ class RewardCalculator:
         is never falsely flagged as stuck, even if individual frame deltas
         are small (e.g., during jumps, platform edges, or slow walking).
         """
+        # Don't count as stuck during level completion animation
+        if hasattr(self, '_level_complete_detected') and self._level_complete_detected:
+            self.frames_stuck = 0
+            return
+        
         # Primary reset: new max distance reached this frame
         # max_x_reached is updated in calculate_frame_reward() BEFORE this call
         if current_x >= self.max_x_reached and current_x > self.last_x_position:
@@ -616,7 +622,11 @@ class RewardCalculator:
             return True, "death"
         
         # Level completion detection
-        if current_state.get('level_progress', 0) >= 100:
+        if current_state.get('is_level_complete', False):
+            self._level_complete_detected = True
+            return True, "level_complete"
+        if current_state.get('level_progress', 0) >= 0.99:
+            self._level_complete_detected = True
             return True, "level_complete"
         
         # Timeout detection
