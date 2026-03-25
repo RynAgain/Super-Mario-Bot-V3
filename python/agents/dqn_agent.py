@@ -347,6 +347,12 @@ class DQNAgent:
             sub-steps that don't trigger an optimizer update)
         """
         if not self.replay_buffer.is_ready(self.batch_size):
+            # Log buffer-not-ready periodically so we can see this in logs
+            if self.training_step % 100 == 0:
+                self.logger.warning(
+                    f"train_step(): buffer NOT ready "
+                    f"(size={len(self.replay_buffer)}, need={self.batch_size})"
+                )
             return {}
         
         # Reset noise for training forward pass (NoisyNet)
@@ -392,6 +398,16 @@ class DQNAgent:
             )
             scaled_loss = loss / accum
             scaled_loss.backward()
+        
+        # Diagnostic: log first few training steps and periodically after
+        if self.training_step < 5 or self.training_step % 500 == 0:
+            self.logger.info(
+                f"[TRAIN-STEP {self.training_step}] loss={loss.item():.6f}, "
+                f"td_errors_mean={td_errors.mean().item():.4f}, "
+                f"td_errors_std={td_errors.std().item():.4f}, "
+                f"rewards_batch={rewards.mean().item():.4f}, "
+                f"distributional={self.distributional}"
+            )
         
         self._grad_accum_counter += 1
         
@@ -448,8 +464,24 @@ class DQNAgent:
             current_q_values = self.q_network(state_frames, state_vectors)
             mean_q_value = current_q_values.mean().item()
         
+        loss_val = loss.item()
+        
+        # Diagnostic: warn if loss or Q-values are zero/NaN
+        if self.training_step <= 5:
+            self.logger.info(
+                f"[TRAIN-METRICS {self.training_step}] loss={loss_val:.6f}, "
+                f"mean_q={mean_q_value:.6f}, "
+                f"q_values_sample={current_q_values[0].cpu().tolist()[:4]}"
+            )
+        if loss_val == 0.0:
+            if self.training_step <= 10 or self.training_step % 1000 == 0:
+                self.logger.warning(
+                    f"train_step() returned loss=0.0 at step {self.training_step} "
+                    f"(distributional={self.distributional}, q_mean={mean_q_value})"
+                )
+        
         return {
-            'loss': loss.item(),
+            'loss': loss_val,
             'mean_q_value': mean_q_value,
             'epsilon': self.epsilon,
             'training_step': self.training_step

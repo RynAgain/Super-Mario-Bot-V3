@@ -208,10 +208,13 @@ class MarioTrainer:
             self.reward_calculator = RewardCalculator(reward_config, stuck_config=stuck_config)
             
             # Initialize episode manager
+            # NOTE: EpisodeManager writes its OWN detailed CSV with reward components.
+            # CSVLogger also writes episodes_{session_id}.csv with a different schema.
+            # They MUST use different filenames to avoid dual-write corruption.
             self.episode_manager = EpisodeManager(
                 reward_calculator=self.reward_calculator,
                 log_directory="logs",
-                csv_filename=f"episodes_{self.session_id}.csv"
+                csv_filename=f"episode_detail_{self.session_id}.csv"
             )
             
             # Initialize frame capture with light-load defaults from training config
@@ -552,27 +555,73 @@ class MarioTrainer:
         
         if episode_qualifies:
             # COMMIT: Store all buffered transitions in replay buffer
+            committed_count = 0
             for transition in self._episode_transitions:
                 pf, ps, aid, rew, nf, ns, done = transition
-                self.agent.store_experience(
-                    pf.to(self.agent.device), ps.to(self.agent.device),
-                    aid, rew,
-                    nf.to(self.agent.device), ns.to(self.agent.device),
-                    done
-                )
+                try:
+                    self.agent.store_experience(
+                        pf.to(self.agent.device), ps.to(self.agent.device),
+                        aid, rew,
+                        nf.to(self.agent.device), ns.to(self.agent.device),
+                        done
+                    )
+                    committed_count += 1
+                except Exception as e:
+                    self.logger.error(f"Failed to store experience: {e}")
+                    break
             
             # Run training steps proportional to transitions committed
             train_count = max(1, len(self._episode_transitions) // 4)  # 1 train per 4 transitions
-            for _ in range(train_count):
-                if self.training_phase != TrainingPhase.WARMUP:
+            train_success = 0
+            train_skipped = 0
+            train_empty = 0
+            train_errors = 0
+            
+            is_warmup = self.training_phase == TrainingPhase.WARMUP
+            buf_size = len(self.agent.replay_buffer)
+            buf_ready = self.agent.replay_buffer.is_ready(self.agent.batch_size)
+            
+            # Log training diagnostics once per qualifying episode
+            if not is_warmup and self.current_episode % 100 == 0:
+                self.logger.info(
+                    f"  [TRAIN-DIAG] phase={self.training_phase.value}, "
+                    f"buf_size={buf_size}, batch_size={self.agent.batch_size}, "
+                    f"buf_ready={buf_ready}, committed={committed_count}, "
+                    f"train_count={train_count}"
+                )
+            
+            for i in range(train_count):
+                if is_warmup:
+                    train_skipped += 1
+                    continue
+                try:
                     metrics = self.agent.train_step()
                     if metrics:
+                        train_success += 1
                         self._latest_training_metrics = metrics
                         if self.tb_writer is not None:
                             gs = self.agent.training_step
                             self.tb_writer.add_scalar("train/loss", metrics.get('loss', 0), gs)
                             self.tb_writer.add_scalar("train/mean_q_value", metrics.get('mean_q_value', 0), gs)
                             self.tb_writer.add_scalar("train/epsilon", metrics.get('epsilon', 0), gs)
+                    else:
+                        train_empty += 1
+                except Exception as e:
+                    train_errors += 1
+                    if train_errors <= 3:
+                        self.logger.error(
+                            f"train_step() FAILED on iteration {i}: {type(e).__name__}: {e}",
+                            exc_info=True
+                        )
+            
+            # Log training outcome summary
+            if not is_warmup and (train_errors > 0 or train_empty == train_count or self.current_episode % 100 == 0):
+                self.logger.info(
+                    f"  [TRAIN-RESULT] ep={self.current_episode + 1}: "
+                    f"success={train_success}, empty={train_empty}, "
+                    f"skipped={train_skipped}, errors={train_errors}, "
+                    f"total={train_count}, latest_loss={self._latest_training_metrics.get('loss', 'N/A')}"
+                )
             
             # Decay epsilon only for qualifying episodes
             self.agent.episode_end(total_reward, episode_stats.frames_processed)
@@ -1136,10 +1185,22 @@ class MarioTrainer:
     
     def _update_training_phase(self):
         """Update training phase based on episode count."""
+        old_phase = self.training_phase
         if self.current_episode < self.training_config.warmup_episodes:
             self.training_phase = TrainingPhase.WARMUP
         else:
             self.training_phase = TrainingPhase.TRAINING
+        
+        # Sync phase to state manager so training_state.json is accurate
+        if hasattr(self, 'training_state') and self.training_state is not None:
+            self.training_state.training_phase = self.training_phase.value
+        
+        # Log phase transitions
+        if old_phase != self.training_phase:
+            self.logger.info(
+                f"*** TRAINING PHASE CHANGE: {old_phase.value} -> {self.training_phase.value} "
+                f"at episode {self.current_episode} ***"
+            )
         
         # Update curriculum phase if enabled
         if self.training_config.enable_curriculum:

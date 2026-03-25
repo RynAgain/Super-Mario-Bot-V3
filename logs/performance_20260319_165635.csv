@@ -1,1 +1,0 @@
-timestamp,episode,step,fps,memory_usage_mb,gpu_memory_mb,gpu_utilization_percent,cpu_percent,network_inference_ms,frame_processing_ms,websocket_latency_ms,disk_io_mb_per_sec,temperature_gpu_celsius,power_draw_watts
