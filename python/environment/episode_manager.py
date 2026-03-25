@@ -146,13 +146,13 @@ class EpisodeManager:
             'recent_performance': deque(maxlen=100)  # Last 100 episodes
         }
         
+        # Setup logging -- must be before _initialize_csv_file() which uses self.logger
+        self.logger = logging.getLogger(__name__)
+        
         # CSV logging
         self.csv_file_path = self.log_directory / self.csv_filename
         self.csv_headers = self._get_csv_headers()
         self._initialize_csv_file()
-        
-        # Setup logging
-        self.logger = logging.getLogger(__name__)
         
         self.logger.info(f"Episode manager initialized with log directory: {self.log_directory}")
     
