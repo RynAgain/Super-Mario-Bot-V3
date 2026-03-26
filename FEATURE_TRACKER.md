@@ -87,6 +87,19 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ---
 
+## Phase 2.9: Training Pipeline Bugfixes (2026-03-25)
+
+> **Status:** Complete. Training confirmed working in session `20260325_182117`
+> (non-zero loss, Q-values, improving performance).
+
+- [x] Silent training failure in `_end_episode()` -- no try/except around `train_step()` meant training errors were swallowed silently
+- [x] `training_state.training_phase` stuck on "warmup" forever -- phase transition logic never fired
+- [x] Episode CSV dual-write corruption -- `EpisodeManager` + `CSVLogger` both writing to same CSV file, causing interleaved/corrupt rows
+- [x] Missing diagnostic logging in `train_step()` -- no visibility into whether training was actually running
+- [x] `EpisodeManager` logger init order bug -- logger used before initialization complete
+
+---
+
 ## Phase 3: Make It Reliable
 
 > **Goal:** Training runs for hours without crashes or connection drops.
@@ -122,48 +135,107 @@ to actually learn. Work top-down -- each section builds on the one above it.
 > **Goal:** Complete World 1-1 reliably, then generalize to other levels.
 
 - [ ] Intrinsic motivation (curiosity) for discovering hidden blocks and warp zones
-- [ ] Learn from human speedrun demonstrations (inverse RL or behavioral cloning)
-- [ ] Model-based RL (Dreamer/MuZero) for planning ahead
-- [ ] "Play mode" where the trained agent plays in real-time with live visualization
+- [D] Learn from human speedrun demonstrations (inverse RL or behavioral cloning) (Deferred)
+- [D] Model-based RL (Dreamer/MuZero) for planning ahead (deferred to another project)
+
+### Play Mode with Live Visualization
+
+> CLI: `python python/main.py play --checkpoint checkpoints/models/1-1_master.pth`
+>
+> The agent plays in real-time at normal NES speed with an OSD overlay
+> showing what the neural network is "thinking." The overlay uses FCEUX's
+> `gui.text()` / `gui.drawbox()` / `gui.drawline()` which draw on a
+> **separate display layer** -- they do NOT modify the NES framebuffer, so
+> the model's CNN input (`gui.gdscreenshot()`) is completely unaffected.
+
+#### Core Play Mode
+- [ ] New `play` command in `python/main.py` (load checkpoint, set eval mode, epsilon=0)
+- [ ] `model.eval()` disables dropout and NoisyNet noise (deterministic policy)
+- [ ] Skip all training, replay buffer, reward calculation, CSV logging
+- [ ] Lua: `emu.speedmode("normal")` for real-time 60fps playback
+- [ ] Reduced frame skip (1-2 instead of 4) for smoother movement
+
+#### Tier 1: Action Q-Value Bar Chart (OSD)
+- [ ] Python sends all 12 Q-values alongside action in WebSocket response
+- [ ] Lua draws 12 horizontal bars at bottom of screen, one per action
+- [ ] Bar width proportional to Q-value (normalized to max)
+- [ ] Selected action highlighted green, others gray
+- [ ] Action names labeled: NOOP, R, L, J, R+J, L+J, Run, R+R, L+R, R+J+R, L+J+R, Down
+- [ ] Confidence display: `max_Q / sum_Q` as percentage
+
+#### Tier 2: State Info Panel (OSD)
+- [ ] Top-right corner: episode number, X position, best distance
+- [ ] Current Q-max value, chosen action name
+- [ ] Model filename, current level (world-level)
+- [ ] Epsilon value (should be 0.0 in play mode)
+
+#### Tier 3: Network Activation Visualization (OSD)
+- [ ] Simplified layer diagram (not 4.5M connections -- summarized activations)
+- [ ] 3 conv layers shown as colored bar strips (avg activation per filter)
+- [ ] Fusion layer as a heatmap band
+- [ ] Value stream: single bar showing V(s) estimate
+- [ ] Advantage stream: 12 bars (same as Q-value chart but separated)
+- [ ] Connections between layer strips with opacity proportional to activation magnitude
+- [ ] Lit green for positive activations, red for negative (MarI/O style)
+
+#### Tier 4: Saliency Map (OSD, advanced)
+- [ ] Gradient-based saliency: which input pixels matter most for chosen action
+- [ ] Overlay translucent heatmap on game screen (red = high importance)
+- [ ] Shows what the model is "looking at" (enemy ahead, gap below, etc.)
+- [ ] Computed in Python, sent as compressed data to Lua for rendering
+- [ ] ~20ms overhead per frame -- may need to run at 30fps instead of 60
+
+#### Protocol Extension
+- [ ] Action response includes `q_values` array, `confidence`, `selected_action_name`
+- [ ] Optional: `layer_activations` array for Tier 3 visualization
+- [ ] Optional: `saliency_data` compressed grid for Tier 4
 
 ---
 
-## Phase 6: Per-Level Models with Auto-Progression
+## Phase 6: Level Progression System
 
-> **Goal:** Detect new levels automatically, create dedicated save states and models
-> for each level, and chain them together so later levels inherit the skills learned
-> on earlier ones.
+> **Goal:** Detect new levels automatically, save states per level, master each
+> level via completion streaks, and transfer learned skills to the next level.
+>
+> **Design doc:** [`plans/level-progression-system.md`](plans/level-progression-system.md)
+
+### Save State Bridge
+- [ ] Add `save_state` and `load_state` commands to `handle_training_control()` in `lua/mario_ai.lua`
+- [ ] Add `send_save_state(slot)` and `send_load_state(slot)` to `python/communication/websocket_server.py`
+- [ ] Slot mapping: slot 10 = 1-1 (default), slots 1-9 for discovered levels
+- [ ] Protocol: JSON messages + ack responses over existing WebSocket
 
 ### Level Detection
-- [ ] Monitor `WORLD` (0x075F) and `LEVEL` (0x0760) memory addresses every frame
-- [ ] Detect level transitions: when (world, level) changes, the agent has reached a new stage
-- [ ] Log every level transition with timestamp, episode, and score for analysis
+- [ ] Dual confirmation: level byte changed AND timer transitions 400 -> 399
+- [ ] Lua reads `0x075F` (world), `0x075C` (level), `0x07F8` (timer hundreds)
+- [ ] On detection: auto-save state to designated slot, send `level_transition` event to Python
+- [ ] Handle edge cases: warp zones, underground sub-areas, game over screen
 
-### Per-Level Save States
-- [ ] When a new level is detected for the first time, auto-create a save state at the start of that level
-- [ ] Assign a dedicated save state slot per level (e.g. slot 10 = 1-1, slot 11 = 1-2, etc.)
-- [ ] On episode reset, load the save state for whichever level the agent is currently training on
-- [ ] Store save state metadata (world, level, power state, lives) in a JSON manifest
+### Completion Streak Tracker
+- [ ] Track consecutive level completions in `LevelManager`
+- [ ] Promotion threshold: 20 consecutive completions (configurable)
+- [ ] Streak resets on any death
+- [ ] Log streak progress to `logs/streak_{session_id}.csv`
 
-### Per-Level Models
-- [ ] Maintain a separate checkpoint directory per level: `checkpoints/world1-1/`, etc.
-- [ ] When starting training on a new level, initialize from the best checkpoint of the previous level
-- [ ] Track per-level metrics independently: completion rate, best distance, average reward
+### Transfer Learning on Promotion
+- [ ] Freeze and save master model as `checkpoints/models/{world}-{level}_master.pth`
+- [ ] Clone weights to initialize next level's model (CNN features transfer)
+- [ ] Reset epsilon to 0.5 for partial re-exploration
+- [ ] Reset NoisyNet sigma parameters to initial values
+- [ ] Clear replay buffer (old level data not useful)
+- [ ] Optionally reset optimizer state (Adam momentum)
 
-### Auto-Curriculum Progression
-- [ ] Define a completion threshold per level (e.g. 80% completion rate over last 100 episodes)
-- [ ] When the threshold is met, automatically advance to the next level
-- [ ] If performance drops below a regression threshold (e.g. 40%), fall back for refresher training
-- [ ] Support manual override to force training on a specific level
+### New Module: `python/training/level_manager.py`
+- [ ] `LevelManager` class: state machine for current level, promotion logic
+- [ ] `StreakTracker` class: consecutive completion counter
+- [ ] Save state slot registry persisted to `checkpoints/level_registry.json`
+- [ ] Model checkpoint registry: tracks mastered models per level
+- [ ] Configuration from `config/training_config.yaml` under `level_progression:`
 
-### Level-Specific Reward Tuning
-- [ ] Allow per-level reward configuration (e.g. underwater levels weight survival higher)
-- [ ] Adjust level length constants per level for accurate progress calculation
-- [ ] Add level-specific hazard detection (e.g. lava in castle levels, water in 2-2)
-
-### Model Merging / Ensemble (stretch)
-- [ ] Experiment with distilling all per-level models into a single universal model
-- [ ] Try an ensemble approach where a meta-controller selects which level-specific model to use
+### Stretch Goals
+- [ ] Per-level reward tuning (underwater levels weight survival higher)
+- [ ] Regression detection: fall back to previous level if performance drops
+- [ ] Model distillation: merge per-level models into a single universal model
 
 ---
 
