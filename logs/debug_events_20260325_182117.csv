@@ -3451,3 +3451,7 @@ timestamp,episode,step,event_type,severity,component,message,mario_x,mario_y,act
 2026-03-26T16:07:52.669216,5076,55,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
 2026-03-26T16:08:07.005698,5077,207,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
 2026-03-26T16:08:26.273910,5078,255,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2026-03-26T16:08:52.671026,5080,359,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2026-03-26T16:09:16.124900,5080,344,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2026-03-26T16:09:47.158010,5081,419,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
+2026-03-26T16:09:53.729568,5082,46,error,high,lua,Lua error [FRAME_DESYNC]: Severe frame ID mismatch detected,0,0,-1,,
