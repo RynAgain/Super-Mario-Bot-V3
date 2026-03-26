@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
-SESSION = "20260322_221337"
+SESSION = "20260325_182117"
 LOG_DIR = Path("logs")
 OUTPUT_DIR = Path("docs/analysis_charts")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
