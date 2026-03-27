@@ -5,7 +5,7 @@ training:
   # Core Learning Parameters
   learning_rate: 0.00025          # Adam optimizer learning rate
   batch_size: 128                 # Training batch size (was 32 -- GPU was only 15-20% utilized)
-  replay_buffer_size: 50000       # Experience replay buffer capacity (was 20000, tried 200000 but OOM)
+  replay_buffer_size: 90000       # Experience replay buffer capacity (was 20000, tried 200000 but OOM)
                                   # 50K x 220KB/entry = ~10.7GB RAM. Stored on CPU to avoid GPU OOM.
   target_update_frequency: 1000   # Target network update interval (steps)
   tau: 0.005                      # Soft target update rate (Polyak averaging)
@@ -41,6 +41,7 @@ training:
   # Advanced Training Options
   double_dqn: true                # Enable Double DQN
   prioritized_replay: true        # Enable prioritized experience replay (was false)
+  priority_alpha: 0.75             # PER alpha -- higher = more aggressive prioritization (was 0.6)
   n_step: 3                       # N-step returns for faster value propagation
   noisy_networks: true            # NoisyNet: state-dependent exploration (replaces epsilon-greedy)
   

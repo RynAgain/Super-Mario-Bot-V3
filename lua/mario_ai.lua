@@ -1799,8 +1799,8 @@ local function send_game_state(game_state)
         '"threats_ahead":' .. (threats.threats_ahead or 0),
         '"threats_behind":' .. (threats.threats_behind or 0),
         '"closest_enemy_dist":' .. (threats.closest_distance or 999),
-        -- Terrain awareness
-        '"on_ground":' .. ((mario.y_velocity == 0) and 1 or 0),
+        -- Terrain awareness (0x001D: 0=ground, 1=airborne, 2=swimming)
+        '"on_ground":' .. ((memory.readbyte(0x001D) == 0) and 1 or 0),
         '"direction":' .. (mario.direction or 0),
         '"invincible":' .. (mario.invincibility_timer or 0),
         -- Power-up on screen

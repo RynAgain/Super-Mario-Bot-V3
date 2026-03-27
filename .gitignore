@@ -25,8 +25,11 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 
-# ---------- Training checkpoints (large binary .pt files) ----------
+# ---------- Training checkpoints (large binary model files) ----------
 checkpoints/*.pt
+checkpoints/*.pth
+checkpoints/*.json
+checkpoints/models/
 
 # ---------- Log rotation backups (only keep the current file) ----------
 logs/*.log.[0-9]*

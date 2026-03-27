@@ -637,10 +637,43 @@ class MarioTrainer:
                            f"x={max_distance}, threshold={self._get_quality_threshold()}, "
                            f"transitions={len(self._episode_transitions)}")
         else:
-            # DISCARD: Don't store transitions, don't train, don't decay epsilon
+            # FILTERED: Don't store this episode's transitions, don't decay epsilon.
+            # BUT: train on existing replay buffer (which includes completions and
+            # high-quality episodes). This turns "wasted" filtered episodes into
+            # additional training iterations that reinforce successful behaviors,
+            # especially helpful for breaking through plateau bottlenecks (pits).
             self._filtered_episode_count += 1
-            self.logger.info(f"  [FILTERED] ep {self.current_episode + 1}: "
-                           f"x={max_distance} < threshold={self._get_quality_threshold()}")
+            
+            if self.training_phase != TrainingPhase.WARMUP and self.agent.replay_buffer.is_ready(self.agent.batch_size):
+                # Train a few steps on existing buffer (fewer than qualifying episodes)
+                replay_train_count = max(1, len(self._episode_transitions) // 8)
+                replay_success = 0
+                replay_errors = 0
+                for _ in range(replay_train_count):
+                    try:
+                        metrics = self.agent.train_step()
+                        if metrics:
+                            replay_success += 1
+                            self._latest_training_metrics = metrics
+                            if self.tb_writer is not None:
+                                gs = self.agent.training_step
+                                self.tb_writer.add_scalar("train/loss", metrics.get('loss', 0), gs)
+                                self.tb_writer.add_scalar("train/mean_q_value", metrics.get('mean_q_value', 0), gs)
+                    except Exception as e:
+                        replay_errors += 1
+                        if replay_errors <= 2:
+                            self.logger.error(f"Filtered replay train_step() failed: {e}")
+                
+                self.logger.info(
+                    f"  [FILTERED+REPLAY] ep {self.current_episode + 1}: "
+                    f"x={max_distance} < threshold={self._get_quality_threshold()}, "
+                    f"replay_trained={replay_success}/{replay_train_count}"
+                )
+            else:
+                self.logger.info(
+                    f"  [FILTERED] ep {self.current_episode + 1}: "
+                    f"x={max_distance} < threshold={self._get_quality_threshold()}"
+                )
         
         # Clear deferred buffer
         self._episode_transitions.clear()

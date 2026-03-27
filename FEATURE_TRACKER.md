@@ -100,6 +100,19 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ---
 
+## Phase 2.95: Plateau-Breaking Reward Shaping (2026-03-27)
+
+> **Status:** Deployed. Addresses plateau at ~720 avg distance (pits at x=450 and x=900).
+> Session `20260325_182117` reached 3 completions but avg distance stagnated.
+
+- [x] Airborne forward bonus -- +0.05/frame for forward movement while jumping; landing bonus for long high jumps (>20px forward, >10px height)
+- [x] Pit clear bonus -- +5.0 one-time reward per known pit crossed (4 pit zones defined in `WORLD_1_1_PITS`)
+- [x] Enemy kill bonus -- +0.5 per estimated kill (score delta >= 100 points = 1 kill)
+- [x] Replay-on-filter -- filtered episodes now train on existing replay buffer instead of wasting wall-clock time
+- [x] PER alpha raised from 0.6 to 0.75 for more aggressive prioritization of high-TD-error transitions (completions, pit crossings)
+
+---
+
 ## Phase 3: Make It Reliable
 
 > **Goal:** Training runs for hours without crashes or connection drops.

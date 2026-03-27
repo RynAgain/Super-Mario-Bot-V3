@@ -7,8 +7,8 @@ and penalty system as specified in the reward system design.
 
 import logging
 import numpy as np
-from typing import Dict, Any, Optional, List, Tuple
-from dataclasses import dataclass
+from typing import Dict, Any, Optional, List, Tuple, Set
+from dataclasses import dataclass, field
 from enum import Enum
 
 
@@ -30,6 +30,17 @@ class KillMethod(Enum):
     UNKNOWN = "unknown"
 
 
+# Known pit X-ranges in World 1-1 (empirically determined from distance distribution cliffs).
+# Each tuple is (start_x, end_x) -- the agent gets a one-time bonus for crossing past end_x
+# when it was previously before start_x at some point in the approach.
+WORLD_1_1_PITS = [
+    (430, 480),    # First pit -- distribution drops from 16.3% to 1.4%
+    (880, 930),    # Second pit -- distribution drops from 11.3% to 1.5%
+    (1540, 1590),  # Third pit area
+    (1620, 1670),  # Fourth pit area
+]
+
+
 @dataclass
 class RewardComponents:
     """Container for individual reward components."""
@@ -42,6 +53,11 @@ class RewardComponents:
     death_penalty: float = 0.0
     movement_penalty: float = 0.0
     stuck_penalty: float = 0.0
+    
+    # Skill-based bonuses (incentivize jumping, pit clearing, and enemy kills)
+    airborne_forward_bonus: float = 0.0
+    pit_clear_bonus: float = 0.0
+    enemy_kill_bonus: float = 0.0
     
     # Enhanced reward components
     powerup_collection_reward: float = 0.0
@@ -57,6 +73,7 @@ class RewardComponents:
         return (self.distance_reward + self.completion_reward + self.powerup_reward +
                 self.enemy_reward + self.score_reward + self.coin_reward +
                 self.death_penalty + self.movement_penalty + self.stuck_penalty +
+                self.airborne_forward_bonus + self.pit_clear_bonus + self.enemy_kill_bonus +
                 self.powerup_collection_reward + self.enemy_elimination_reward +
                 self.environmental_navigation_reward + self.velocity_movement_reward +
                 self.strategic_positioning_reward + self.enhanced_death_penalty)
@@ -73,6 +90,9 @@ class RewardComponents:
             'death_penalty': self.death_penalty,
             'movement_penalty': self.movement_penalty,
             'stuck_penalty': self.stuck_penalty,
+            'airborne_forward_bonus': self.airborne_forward_bonus,
+            'pit_clear_bonus': self.pit_clear_bonus,
+            'enemy_kill_bonus': self.enemy_kill_bonus,
             'powerup_collection_reward': self.powerup_collection_reward,
             'enemy_elimination_reward': self.enemy_elimination_reward,
             'environmental_navigation_reward': self.environmental_navigation_reward,
@@ -208,6 +228,13 @@ class RewardCalculator:
         self.last_x_position = 0
         self.progress_milestones_reached = set()
         
+        # Skill bonus tracking
+        self._airborne_frames = 0          # Consecutive frames off ground
+        self._airborne_start_x = 0         # X position when leaving ground
+        self._max_airborne_y_delta = 0     # Peak height gained during jump
+        self._pits_cleared: Set[int] = set()  # Indices of pits cleared this episode
+        self._previous_score = 0           # For detecting score-based enemy kills
+        
         # Enhanced state tracking
         self.previous_power_state = 0
         self.previous_enemy_count = 0
@@ -263,6 +290,13 @@ class RewardCalculator:
         self._cached_terminal = None
         self._cached_terminal_reason = ""
         self._level_complete_detected = False
+        
+        # Reset skill bonus tracking
+        self._airborne_frames = 0
+        self._airborne_start_x = 0
+        self._max_airborne_y_delta = 0
+        self._pits_cleared = set()
+        self._previous_score = initial_state.get('score', 0)
         
         # Reset enhanced state tracking
         if self.enhanced_features:
@@ -328,6 +362,66 @@ class RewardCalculator:
                 # to the progress that preceded it.
                 progress_penalty = self.max_x_reached * 0.01
                 components.death_penalty = -(5.0 + progress_penalty)
+        
+        # ===== SKILL BONUSES =====
+        
+        # 1. AIRBORNE FORWARD BONUS: reward forward movement while jumping.
+        #    Incentivizes long, high jumps that carry Mario over obstacles/pits.
+        #    Only triggers when Mario is off the ground AND moving forward.
+        on_ground = current_state.get('on_ground', 1)
+        mario_y = current_state.get('mario_y', 176)
+        prev_y = self.previous_state.get('mario_y', 176)
+        
+        if not on_ground:
+            # Mario is airborne
+            if self._airborne_frames == 0:
+                # Just left the ground
+                self._airborne_start_x = previous_x
+                self._max_airborne_y_delta = 0
+            self._airborne_frames += 1
+            # Track peak height (lower Y = higher on screen in NES coordinates)
+            y_delta = (self.previous_state.get('mario_y', 176) - mario_y)
+            self._max_airborne_y_delta = max(self._max_airborne_y_delta, y_delta)
+            
+            # Small bonus for forward movement while airborne
+            if current_x > previous_x:
+                components.airborne_forward_bonus = 0.05  # per-frame bonus for forward jumps
+        else:
+            # Mario just landed (was airborne, now on ground)
+            if self._airborne_frames > 0:
+                airborne_distance = current_x - self._airborne_start_x
+                # Bonus for long, high forward jumps (>20 pixels forward AND >10 pixels height)
+                if airborne_distance > 20 and self._max_airborne_y_delta > 10:
+                    # Scale bonus with jump quality: distance * height factor
+                    height_factor = min(self._max_airborne_y_delta / 30.0, 2.0)  # cap at 2x
+                    components.airborne_forward_bonus = min(airborne_distance * 0.05 * height_factor, 3.0)
+            # Reset airborne tracking
+            self._airborne_frames = 0
+            self._airborne_start_x = 0
+            self._max_airborne_y_delta = 0
+        
+        # 2. PIT CLEAR BONUS: one-time reward for successfully crossing known pit zones.
+        #    The agent gets a significant bonus when max_x_reached passes a pit's end_x
+        #    for the first time. This directly addresses the plateau at pit locations.
+        for pit_idx, (pit_start, pit_end) in enumerate(WORLD_1_1_PITS):
+            if pit_idx not in self._pits_cleared and self.max_x_reached >= pit_end:
+                self._pits_cleared.add(pit_idx)
+                components.pit_clear_bonus = 5.0  # significant one-time bonus per pit
+                self.logger.info(f"  [PIT-CLEAR] Pit {pit_idx} cleared! (x={pit_start}-{pit_end}, mario_x={current_x})")
+        
+        # 3. ENEMY KILL BONUS: reward based on score increases that indicate enemy kills.
+        #    In SMB, killing enemies gives 100-8000 points. A score jump of >=100 likely
+        #    means an enemy was stomped/shelled. This incentivizes engaging enemies instead
+        #    of just running past them (stomping Goombas at pits is a valid strategy).
+        current_score = current_state.get('score', 0)
+        score_delta = current_score - self._previous_score
+        if score_delta >= 100:
+            # Approximate kills: each 100-point increment = ~1 kill
+            estimated_kills = min(score_delta // 100, 5)  # cap at 5 to avoid coin-farm exploits
+            components.enemy_kill_bonus = estimated_kills * 0.5  # 0.5 per kill
+        self._previous_score = current_score
+        
+        # ===== END SKILL BONUSES =====
         
         # Cache terminal detection result BEFORE updating previous_state
         # so that detect_terminal_state() still sees the real previous state
