@@ -450,46 +450,43 @@ local function mutate_add_connection(genome)
     for _ = 1, 50 do
         local from_id = node_ids[math.random(#node_ids)]
         local to_id   = node_ids[math.random(#node_ids)]
+        local valid = true
 
         -- No self-connections
-        if from_id == to_id then goto continue end
+        if from_id == to_id then valid = false end
 
         -- No connections TO input nodes
-        if genome.nodes[to_id] == "input" then goto continue end
+        if valid and genome.nodes[to_id] == "input" then valid = false end
 
         -- No connections FROM output nodes
-        if genome.nodes[from_id] == "output" then goto continue end
+        if valid and genome.nodes[from_id] == "output" then valid = false end
 
         -- Check if connection already exists
-        local exists = false
-        for _, g in ipairs(genome.genes) do
-            if g.from == from_id and g.to == to_id then
-                exists = true
-                break
+        if valid then
+            for _, g in ipairs(genome.genes) do
+                if g.from == from_id and g.to == to_id then
+                    valid = false
+                    break
+                end
             end
         end
-        if exists then goto continue end
 
-        -- Prevent cycles: don't allow output->hidden or hidden->hidden paths that
-        -- would create a cycle. Simple check: to_id must not be an ancestor of from_id.
-        -- For feed-forward networks, ensure from < to in topological order.
-        -- Heuristic: input < hidden < output by ID convention; for hidden nodes we allow
-        -- connections from lower ID to higher ID only to prevent cycles.
-        if genome.nodes[from_id] == "hidden" and genome.nodes[to_id] == "hidden" then
-            if from_id >= to_id then goto continue end
+        -- Prevent cycles: for hidden->hidden, only allow lower ID -> higher ID
+        if valid and genome.nodes[from_id] == "hidden" and genome.nodes[to_id] == "hidden" then
+            if from_id >= to_id then valid = false end
         end
 
-        -- Add the connection
-        genome.genes[#genome.genes + 1] = {
-            from       = from_id,
-            to         = to_id,
-            weight     = math.random() * 4 - 2,
-            enabled    = true,
-            innovation = next_innovation(from_id, to_id),
-        }
-        return
-
-        ::continue::
+        -- Add the connection if all checks passed
+        if valid then
+            genome.genes[#genome.genes + 1] = {
+                from       = from_id,
+                to         = to_id,
+                weight     = math.random() * 4 - 2,
+                enabled    = true,
+                innovation = next_innovation(from_id, to_id),
+            }
+            return
+        end
     end
 end
 

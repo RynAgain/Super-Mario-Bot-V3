@@ -64,11 +64,10 @@ local FEATURES_1_1 = {
     {x=912,  type="pipe",    name="Pipe 4 (tall)"},
     {x=2608, type="pipe",    name="Warp Pipe"},
     
-    -- Pits (gaps in the ground) -- verified from GA genome analysis 2026-03-28
-    -- NOTE: x~449-592 is tall pipes + goombas, NOT a pit. Only 3 pits in 1-1.
-    {x=847,  type="pit",     name="Pit 1 (running jump)", x_end=933},
-    {x=1456, type="pit",     name="Pit 2 (large gap)", x_end=1582},
-    {x=2476, type="pit",     name="Pit 3 (late)", x_end=2548},
+    -- Pits (gaps in the ground)
+    -- SMB 1-1 has exactly 2 pits; x~847 area is solid ground between pipes.
+    {x=1104, type="pit",     name="Pit 1 (2-tile gap)", x_end=1136},
+    {x=1376, type="pit",     name="Pit 2 (wider gap)", x_end=1424},
     
     -- Question blocks and power-ups
     {x=256,  type="block",   name="? Block (Coin)"},
@@ -200,22 +199,22 @@ local function draw_overlay()
     -- =====================
     -- TOP-LEFT: Stats Panel
     -- =====================
-    gui.drawbox(0, 0, 130, 85, COLORS.bg, COLORS.bg)
+    gui.drawbox(0, 10, 130, 95, COLORS.bg, COLORS.bg)
     
-    gui.text(2, 2,  string.format("X: %d (%.1f%%)", mario_x, progress), COLORS.stat)
-    gui.text(2, 12, string.format("MAX: %d (%.1f%%)", state.max_x, max_progress), COLORS.text)
-    gui.text(2, 22, string.format("Y: %d  %s  %s", mario_y, float_text, power_text), COLORS.text)
-    gui.text(2, 32, string.format("Vel: %d,%d  Dir:%s", vel_x, vel_y, dir_text), COLORS.text)
-    gui.text(2, 42, string.format("W%d-%d  T:%d", world, level, timer), COLORS.text)
-    gui.text(2, 52, string.format("Score:%d  Coins:%d", score, coins), COLORS.text)
-    gui.text(2, 62, string.format("Lives:%d  Deaths:%d", lives + 1, state.deaths), COLORS.text)
-    gui.text(2, 72, string.format("Frame: %d", state.frame_count), "#888888")
+    gui.text(2, 12,  string.format("X: %d (%.1f%%)", mario_x, progress), COLORS.stat)
+    gui.text(2, 22, string.format("MAX: %d (%.1f%%)", state.max_x, max_progress), COLORS.text)
+    gui.text(2, 32, string.format("Y: %d  %s  %s", mario_y, float_text, power_text), COLORS.text)
+    gui.text(2, 42, string.format("Vel: %d,%d  Dir:%s", vel_x, vel_y, dir_text), COLORS.text)
+    gui.text(2, 52, string.format("W%d-%d  T:%d", world, level, timer), COLORS.text)
+    gui.text(2, 62, string.format("Score:%d  Coins:%d", score, coins), COLORS.text)
+    gui.text(2, 72, string.format("Lives:%d  Deaths:%d", lives + 1, state.deaths), COLORS.text)
+    gui.text(2, 82, string.format("Frame: %d", state.frame_count), "#888888")
     
     -- =====================
     -- TOP-RIGHT: Nearest Features
     -- =====================
-    gui.drawbox(140, 0, 255, 55, COLORS.bg, COLORS.bg)
-    gui.text(142, 2, "-- AHEAD --", "#AAAAAA")
+    gui.drawbox(140, 10, 255, 65, COLORS.bg, COLORS.bg)
+    gui.text(142, 12, "-- AHEAD --", "#AAAAAA")
     
     local ahead_count = 0
     for _, feat in ipairs(FEATURES_1_1) do
@@ -224,13 +223,13 @@ local function draw_overlay()
             local color = COLORS[feat.type] or COLORS.text
             local name = feat.name
             if #name > 18 then name = string.sub(name, 1, 18) end
-            gui.text(142, 12 + ahead_count * 10, string.format("%dpx %s", dist, name), color)
+            gui.text(142, 22 + ahead_count * 10, string.format("%dpx %s", dist, name), color)
             ahead_count = ahead_count + 1
         end
     end
     
     if ahead_count == 0 then
-        gui.text(142, 12, "(clear ahead)", "#666666")
+        gui.text(142, 22, "(clear ahead)", "#666666")
     end
     
     -- =====================
@@ -242,7 +241,7 @@ local function draw_overlay()
                 local dist = feat.x - mario_x
                 if dist > -50 and dist < 80 then
                     local flash = (state.frame_count % 10 < 5) and COLORS.warn or "#FF8800"
-                    gui.text(80, 220, string.format("!! PIT: %s [%dpx] !!", feat.name, dist), flash)
+                    gui.text(80, 230, string.format("!! PIT: %s [%dpx] !!", feat.name, dist), flash)
                 end
             end
         end
@@ -251,7 +250,7 @@ local function draw_overlay()
     -- =====================
     -- MINIMAP BAR (bottom)
     -- =====================
-    local bar_y = 230
+    local bar_y = 240
     local bar_w = 240
     local bar_x = 8
     
