@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import numpy as np
 
-SESSION = "20260325_182117"
+SESSION = "20260327_002726"
 LOG_DIR = Path("logs")
 OUTPUT_DIR = Path("docs/analysis_charts")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -428,6 +428,70 @@ def plot_combined_dashboard(episodes):
     plt.close(fig)
     print(f"  [+] Saved training_dashboard.png")
 
+def plot_zone_survival(episodes, window=500):
+    """
+    Multi-line chart showing rolling survival rate past major death zones.
+    
+    Each line tracks what percentage of episodes in a rolling window made it
+    past a specific X threshold. Shows how the agent improves at navigating
+    each obstacle over training time.
+    """
+    # Define death zones with human-readable names
+    # These match the known bottlenecks from World 1-1 distance distribution analysis
+    DEATH_ZONES = [
+        (200, 'Goombas / Pipes (x>200)'),
+        (450, 'First Pit (x>450)'),
+        (700, 'Pipe Maze / Stairs (x>700)'),
+        (900, 'Second Pit (x>900)'),
+        (1100, 'Post-Pit Stretch (x>1100)'),
+        (1500, 'Late Level (x>1500)'),
+        (2000, 'Deep Run (x>2000)'),
+        (3100, 'Level Complete (x>3100)'),
+    ]
+    
+    # Color palette for the lines
+    colors = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#c0392b']
+    
+    fig, ax = plt.subplots(figsize=(16, 8))
+    
+    ep_nums = [e['episode'] for e in episodes]
+    distances = [e['mario_x_max'] for e in episodes]
+    
+    for i, (threshold, label) in enumerate(DEATH_ZONES):
+        # Calculate rolling survival rate past this threshold
+        survival = []
+        for j in range(len(episodes)):
+            start = max(0, j - window + 1)
+            batch = distances[start:j + 1]
+            if batch:
+                survived = sum(1 for d in batch if d >= threshold)
+                survival.append(survived / len(batch) * 100)
+            else:
+                survival.append(0)
+        
+        # Only plot if there's meaningful data (at least some episodes past threshold)
+        max_survival = max(survival) if survival else 0
+        if max_survival > 0.5:  # At least 0.5% survival rate at some point
+            color = colors[i % len(colors)]
+            ax.plot(ep_nums, survival, color=color, linewidth=2, label=label, alpha=0.85)
+    
+    ax.set_xlabel('Episode', fontsize=12)
+    ax.set_ylabel(f'Survival Rate (%, MA {window})', fontsize=12)
+    ax.set_title(f'Zone Survival Rates Over Training (Session {SESSION})', fontsize=14, fontweight='bold')
+    ax.set_ylim(-2, 105)
+    ax.legend(loc='upper left', fontsize=9, framealpha=0.9)
+    ax.grid(True, alpha=0.3)
+    
+    # Add horizontal reference lines
+    ax.axhline(y=50, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+    ax.axhline(y=25, color='gray', linestyle=':', alpha=0.2, linewidth=0.8)
+    ax.axhline(y=75, color='gray', linestyle='--', alpha=0.3, linewidth=0.8)
+    
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / 'zone_survival.png', dpi=150)
+    plt.close(fig)
+    print(f"  [+] Saved zone_survival.png")
+
 def analyze():
     episodes = parse_episodes(LOG_DIR / f"episodes_{SESSION}.csv")
     training = parse_training(LOG_DIR / f"training_{SESSION}.csv")
@@ -605,6 +669,7 @@ def analyze():
     plot_distance_histogram(episodes)
     plot_bucketed_summary(episodes)
     plot_combined_dashboard(episodes)
+    plot_zone_survival(episodes)
     
     if training:
         plot_action_distribution(training)

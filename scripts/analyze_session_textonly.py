@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 import numpy as np
 
-SESSION = "20260325_182117"
+SESSION = "20260327_002726"
 LOG_DIR = Path("logs")
 
 

@@ -71,6 +71,10 @@ training:
     frontier_ratio: 0.8           # Qualify if max_x >= session_best * ratio
     periodic_qualify_every: 20    # Every Nth episode always qualifies (maintains negative signal)
   
+  # Auto-git: commit training logs to git every N episodes
+  auto_git_commit: false          # Disabled by default -- enable when git is configured
+  auto_git_interval: 1000         # Commit every N episodes
+  
   curriculum:
     enabled: false                  # Disabled until we have a working baseline
     phases:
