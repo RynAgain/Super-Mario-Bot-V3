@@ -1756,14 +1756,30 @@ local function send_game_state(game_state)
     local pit_detected = false
     local solid_tiles_ahead = 0
     if game_state.level_tiles then
+        -- Count solid tiles ahead (for obstacle awareness)
         for key, tile in pairs(game_state.level_tiles) do
             if tile.x_offset and tile.x_offset >= 1 and tile.x_offset <= 3 then
-                -- Tiles ahead of Mario (right side)
                 if tile.is_solid then
                     solid_tiles_ahead = solid_tiles_ahead + 1
-                elseif tile.y_offset and tile.y_offset >= 1 and not tile.is_solid then
-                    -- Empty tile below and ahead = potential pit
+                end
+            end
+        end
+        
+        -- Pit detection: only flag when Mario is near ground level (y > 140).
+        -- Previously triggered on pipes/bricks/staircases because ANY empty tile
+        -- below Mario's row counted as a pit, even when Mario was elevated.
+        -- Now requires: near ground level + ground row AND sub-ground row both empty.
+        local mario_y_pos = mario.y_pos_level or 176
+        if mario_y_pos > 140 then
+            for dx = 1, 3 do
+                local ground_key = string.format("%d_%d", dx, 1)   -- 1 row below Mario
+                local below_key = string.format("%d_%d", dx, 2)    -- 2 rows below
+                local ground_tile = game_state.level_tiles[ground_key]
+                local below_tile = game_state.level_tiles[below_key]
+                if ground_tile and below_tile
+                   and not ground_tile.is_solid and not below_tile.is_solid then
                     pit_detected = true
+                    break
                 end
             end
         end

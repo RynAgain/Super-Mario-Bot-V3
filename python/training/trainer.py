@@ -23,6 +23,7 @@ from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass, field
 from enum import Enum
 import threading
+import subprocess
 
 # TensorBoard -- optional but recommended
 try:
@@ -457,6 +458,12 @@ class MarioTrainer:
                 # Save checkpoint periodically
                 if self.current_episode % self.training_config.save_frequency == 0:
                     await self._save_checkpoint()
+                
+                # Auto-git commit logs (non-blocking, failure-safe, off by default)
+                git_interval = self.config.get('training', {}).get('auto_git_interval', 1000)
+                git_enabled = self.config.get('training', {}).get('auto_git_commit', False)
+                if git_enabled and self.current_episode > 0 and self.current_episode % git_interval == 0:
+                    self._try_git_commit_logs()
                 
                 # Skip evaluation completely to prevent connection drops
                 # Evaluation causes WebSocket disconnection issues
@@ -1378,6 +1385,77 @@ class MarioTrainer:
             
         except Exception as e:
             self.logger.error(f"Failed to save checkpoint: {e}")
+    
+    def _try_git_commit_logs(self):
+        """
+        Attempt to git add/commit/push training logs every N episodes.
+        
+        Completely non-blocking and failure-safe -- if git is not installed,
+        not configured, or the repo has no remote, it logs a warning and
+        continues training without interruption.
+        """
+        ep = self.current_episode
+        try:
+            # Quick check: is git available?
+            result = subprocess.run(
+                ['git', '--version'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                self.logger.info("[GIT] git not found on PATH -- auto-commit disabled")
+                return
+            
+            # Check if we're in a git repo
+            result = subprocess.run(
+                ['git', 'rev-parse', '--is-inside-work-tree'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode != 0:
+                self.logger.info("[GIT] Not inside a git repository -- auto-commit disabled")
+                return
+            
+            # Stage log files and training state
+            subprocess.run(
+                ['git', 'add', 'logs/', 'checkpoints/training_state.json'],
+                capture_output=True, text=True, timeout=10
+            )
+            
+            # Commit with episode info
+            commit_msg = (
+                f"[auto] Training logs at episode {ep} "
+                f"(session {self.session_id}, "
+                f"best_x={self._session_max_x}, "
+                f"eps={self.agent.epsilon:.4f})"
+            )
+            commit_result = subprocess.run(
+                ['git', 'commit', '-m', commit_msg, '--no-verify'],
+                capture_output=True, text=True, timeout=15
+            )
+            
+            if commit_result.returncode == 0:
+                self.logger.info(f"[GIT] Committed logs at episode {ep}")
+                
+                # Try push (non-blocking -- don't wait for remote)
+                try:
+                    subprocess.Popen(
+                        ['git', 'push'],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    self.logger.info(f"[GIT] Push initiated (background)")
+                except Exception:
+                    self.logger.debug("[GIT] Push failed -- no remote configured or network unavailable")
+            elif 'nothing to commit' in commit_result.stdout:
+                self.logger.debug(f"[GIT] Nothing to commit at episode {ep}")
+            else:
+                self.logger.warning(f"[GIT] Commit failed: {commit_result.stderr.strip()}")
+                
+        except FileNotFoundError:
+            self.logger.info("[GIT] git executable not found -- auto-commit disabled")
+        except subprocess.TimeoutExpired:
+            self.logger.warning("[GIT] git command timed out -- skipping this commit")
+        except Exception as e:
+            self.logger.warning(f"[GIT] Auto-commit failed: {type(e).__name__}: {e}")
     
     async def _resume_from_checkpoint(self, checkpoint_path: str):
         """Resume training from checkpoint."""

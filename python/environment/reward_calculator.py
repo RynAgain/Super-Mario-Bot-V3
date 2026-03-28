@@ -30,14 +30,19 @@ class KillMethod(Enum):
     UNKNOWN = "unknown"
 
 
-# Known pit X-ranges in World 1-1 (empirically determined from distance distribution cliffs).
-# Each tuple is (start_x, end_x) -- the agent gets a one-time bonus for crossing past end_x
-# when it was previously before start_x at some point in the approach.
+# Known pit X-ranges in World 1-1.
+# IMPORTANT: These must be actual ground gaps, NOT death-distribution clusters.
+# The distance distribution drops at x=300 and x=700 are from enemies/pipes, not pits.
+# Actual ground gaps in SMB 1-1 (verified against level layout):
+# Use debug_overlay.lua with manual play to verify exact X positions.
+# Set to empty until verified -- pit clear bonus disabled until positions confirmed.
 WORLD_1_1_PITS = [
-    (430, 480),    # First pit -- distribution drops from 16.3% to 1.4%
-    (880, 930),    # Second pit -- distribution drops from 11.3% to 1.5%
-    (1540, 1590),  # Third pit area
-    (1620, 1670),  # Fourth pit area
+    # TODO: Verify with debug_overlay.lua and fill in actual pit X ranges
+    # Approximate locations from SMB 1-1 tile map (need manual verification):
+    # (1070, 1120),  # First gap (after tall pipe area)
+    # (1360, 1410),  # Second gap
+    # (1430, 1470),  # Third gap (close to second)
+    # (2480, 2530),  # Late level gap
 ]
 
 
