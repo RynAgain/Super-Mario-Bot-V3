@@ -2234,6 +2234,14 @@ local function handle_training_control(message)
         local json_data = json.encode(episode_start_msg)
         send_websocket_message(g_state.websocket, json_data, false)
         
+    elseif message.command == "set_speed" then
+        -- Switch emulator speed mode (turbo for training, normal for eval/play)
+        local mode = message.speed_mode or "turbo"
+        if emu and emu.speedmode then
+            emu.speedmode(mode)
+            debug_log("Speed mode set to: " .. mode, "INFO")
+        end
+    
     elseif message.command == "stop" then
         g_state.training_active = false
         debug_log("Training stopped")
@@ -3106,6 +3114,16 @@ function validate_enhanced_addresses()
     end
     
     debug_log("Enhanced address validation completed")
+end
+
+-- Enable turbo speed for training (skip rendering, remove 60fps cap).
+-- FCEUX will still process frames correctly, just won't draw to screen.
+-- This gives a significant speedup since most frames are skipped (frame_skip=4)
+-- and don't need to wait for Python's response.
+-- Switch to emu.speedmode("normal") for play mode / visualization.
+if emu and emu.speedmode then
+    emu.speedmode("turbo")
+    debug_log("Turbo speed mode enabled for training", "INFO")
 end
 
 -- End of script

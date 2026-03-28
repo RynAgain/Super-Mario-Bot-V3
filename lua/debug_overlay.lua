@@ -64,14 +64,11 @@ local FEATURES_1_1 = {
     {x=912,  type="pipe",    name="Pipe 4 (tall)"},
     {x=2608, type="pipe",    name="Warp Pipe"},
     
-    -- Pits (gaps in the ground) -- TODO: verify exact X with manual play
-    -- Previous values (430, 880, 1540, 1620) were death distribution clusters,
-    -- NOT actual ground gaps. Those deaths are from enemies/pipes.
-    -- Approximate real pit locations (need verification with X readout):
-    {x=1070, type="pit",     name="Pit 1", x_end=1120},
-    {x=1360, type="pit",     name="Pit 2", x_end=1410},
-    {x=1430, type="pit",     name="Pit 3", x_end=1470},
-    {x=2480, type="pit",     name="Pit 4", x_end=2530},
+    -- Pits (gaps in the ground) -- verified from GA genome analysis 2026-03-28
+    -- NOTE: x~449-592 is tall pipes + goombas, NOT a pit. Only 3 pits in 1-1.
+    {x=847,  type="pit",     name="Pit 1 (running jump)", x_end=933},
+    {x=1456, type="pit",     name="Pit 2 (large gap)", x_end=1582},
+    {x=2476, type="pit",     name="Pit 3 (late)", x_end=2548},
     
     -- Question blocks and power-ups
     {x=256,  type="block",   name="? Block (Coin)"},
