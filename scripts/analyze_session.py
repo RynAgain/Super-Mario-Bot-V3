@@ -154,30 +154,119 @@ def plot_steps(episodes):
     plt.close(fig)
     print(f"  [+] Saved steps_over_time.png")
 
+# Readable labels and colors for death types
+DEATH_LABELS = {
+    'death_fall': 'Fell in Pit',
+    'death_enemy': 'Enemy Contact',
+    'death_timeout': 'Time Expired',
+    'death_unknown': 'Unknown Death',
+    'death': 'Death (unclassified)',
+    'timeout': 'Timeout (no life loss)',
+    'stuck_timeout': 'Stuck Too Long',
+    'level_complete': 'Level Complete',
+    '': 'No Cause Logged',
+}
+
+DEATH_COLORS = {
+    'death_fall': '#e74c3c',       # red
+    'death_enemy': '#e67e22',      # orange
+    'death_timeout': '#f39c12',    # amber
+    'death_unknown': '#95a5a6',    # grey
+    'death': '#c0392b',            # dark red (legacy)
+    'timeout': '#f1c40f',          # yellow
+    'stuck_timeout': '#9b59b6',    # purple
+    'level_complete': '#2ecc71',   # green
+    '': '#bdc3c7',                 # light grey
+}
+
 def plot_death_causes(episodes):
-    """Plot death cause distribution as pie chart."""
+    """Plot death cause distribution as pie chart with granular types."""
     dc = defaultdict(int)
     for e in episodes:
         dc[e['death_cause']] += 1
     
-    labels = list(dc.keys())
-    sizes = list(dc.values())
-    
     # Sort by frequency
-    paired = sorted(zip(sizes, labels), reverse=True)
-    sizes, labels = zip(*paired)
-    
-    colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#95a5a6']
+    paired = sorted(dc.items(), key=lambda x: -x[1])
+    labels = [DEATH_LABELS.get(k, k) for k, _ in paired]
+    sizes = [v for _, v in paired]
+    colors = [DEATH_COLORS.get(k, '#bdc3c7') for k, _ in paired]
     
     fig, ax = plt.subplots(figsize=(10, 8))
-    wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%', 
-                                       colors=colors[:len(labels)], startangle=90,
+    wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%',
+                                       colors=colors, startangle=90,
                                        textprops={'fontsize': 10})
     ax.set_title('Death Cause Distribution', fontsize=14, fontweight='bold')
     fig.tight_layout()
     fig.savefig(OUTPUT_DIR / 'death_causes.png', dpi=150)
     plt.close(fig)
     print(f"  [+] Saved death_causes.png")
+
+def plot_death_positions(episodes):
+    """Plot death X-position histogram colored by death type.
+    
+    Shows WHERE on the level Mario dies most, with stacked bars
+    colored by cause (pit/enemy/stuck/timeout). This reveals
+    obstacle-specific bottlenecks the DQN needs to overcome.
+    """
+    # Collect (x_position, death_type) for all death episodes
+    death_data = []
+    for e in episodes:
+        cause = e['death_cause']
+        if cause.startswith('death') or cause in ('stuck_timeout', 'timeout'):
+            death_data.append((e['mario_x_max'], cause))
+    
+    if not death_data:
+        print("  [!] No death data for death_positions chart")
+        return
+    
+    # Define X bins (every 100 pixels across the level)
+    bin_edges = list(range(0, 3300, 100))
+    
+    # Group deaths by cause
+    cause_order = ['death_fall', 'death_enemy', 'death_timeout', 'death_unknown',
+                   'death', 'stuck_timeout', 'timeout']
+    cause_bins = {}
+    for cause in cause_order:
+        positions = [x for x, c in death_data if c == cause]
+        if positions:
+            counts, _ = np.histogram(positions, bins=bin_edges)
+            cause_bins[cause] = counts
+    
+    if not cause_bins:
+        print("  [!] No binnable death data for death_positions chart")
+        return
+    
+    fig, ax = plt.subplots(figsize=(16, 6))
+    bin_centers = [(bin_edges[i] + bin_edges[i+1]) / 2 for i in range(len(bin_edges) - 1)]
+    width = 80
+    
+    # Stacked bar chart
+    bottom = np.zeros(len(bin_centers))
+    for cause in cause_order:
+        if cause in cause_bins:
+            label = DEATH_LABELS.get(cause, cause)
+            color = DEATH_COLORS.get(cause, '#bdc3c7')
+            ax.bar(bin_centers, cause_bins[cause], width=width, bottom=bottom,
+                   label=label, color=color, alpha=0.85)
+            bottom += cause_bins[cause]
+    
+    # Mark known pit locations (only 3 real pits in 1-1; x~500 is pipes+goombas)
+    PITS = [(847, 933), (1456, 1582), (2476, 2548)]
+    for pit_start, pit_end in PITS:
+        ax.axvspan(pit_start, pit_end, alpha=0.1, color='red', zorder=0)
+        ax.text((pit_start + pit_end) / 2, ax.get_ylim()[1] * 0.95, 'PIT',
+                ha='center', va='top', fontsize=7, color='red', alpha=0.6)
+    
+    ax.set_xlabel('Level X Position', fontsize=12)
+    ax.set_ylabel('Deaths', fontsize=12)
+    ax.set_title('Death Heatmap by Level Position (colored by cause)', fontsize=14, fontweight='bold')
+    ax.legend(loc='upper right', fontsize=9)
+    ax.set_xlim(0, 3200)
+    ax.grid(True, alpha=0.2, axis='y')
+    fig.tight_layout()
+    fig.savefig(OUTPUT_DIR / 'death_positions.png', dpi=150)
+    plt.close(fig)
+    print(f"  [+] Saved death_positions.png")
 
 def plot_exploration(episodes):
     """Plot exploration ratio over training."""
@@ -437,15 +526,16 @@ def plot_zone_survival(episodes, window=500):
     each obstacle over training time.
     """
     # Define death zones with human-readable names
-    # These match the known bottlenecks from World 1-1 distance distribution analysis
+    # World 1-1 has 3 pits: x~847, x~1456, x~2476
+    # x~450-600 is tall pipes + goombas (NOT a pit)
     DEATH_ZONES = [
-        (200, 'Goombas / Pipes (x>200)'),
-        (450, 'First Pit (x>450)'),
-        (700, 'Pipe Maze / Stairs (x>700)'),
-        (900, 'Second Pit (x>900)'),
-        (1100, 'Post-Pit Stretch (x>1100)'),
-        (1500, 'Late Level (x>1500)'),
+        (200, 'Goombas / Early Pipes (x>200)'),
+        (500, 'Tall Pipes + Goombas (x>500)'),
+        (850, 'Past Pit 1 (x>850)'),
+        (1100, 'Mid-level Stretch (x>1100)'),
+        (1580, 'Past Pit 2 (x>1580)'),
         (2000, 'Deep Run (x>2000)'),
+        (2550, 'Past Pit 3 (x>2550)'),
         (3100, 'Level Complete (x>3100)'),
     ]
     
@@ -665,6 +755,7 @@ def analyze():
     plot_distance(episodes)
     plot_steps(episodes)
     plot_death_causes(episodes)
+    plot_death_positions(episodes)
     plot_exploration(episodes)
     plot_distance_histogram(episodes)
     plot_bucketed_summary(episodes)

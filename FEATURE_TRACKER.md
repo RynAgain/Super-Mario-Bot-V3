@@ -117,6 +117,49 @@ to actually learn. Work top-down -- each section builds on the one above it.
 
 ---
 
+## Phase 2.99: Training Speed + Genetic Algorithm Tools (2026-03-28)
+
+> **Status:** Complete. GA solved World 1-1 in 9 generations. DQN turbo mode
+> and visual evaluation episodes verified working.
+
+- [x] Turbo speed mode for DQN training -- `emu.speedmode("turbo")` in `mario_ai.lua` startup
+- [x] Speed mode WebSocket command -- `set_speed` in Lua + `send_set_speed()` in Python
+- [x] Visual evaluation episodes every 100 episodes -- switch to normal speed, epsilon=0, greedy policy
+- [x] Genetic algorithm brute force script (`lua/genetic_bruteforce.lua`) -- found winning 1-1 solution in 9 generations (~450 evaluations)
+- [x] GA Phase 2: speed optimization -- minimize completion frames while maintaining completion
+- [x] GA genome analyzer -- integrated into victory lap, produces `genome_analysis.csv` + `genome_analysis_summary.txt`
+- [x] Debug overlay script (`lua/debug_overlay.lua`) -- game state stats, feature markers, minimap, pit warnings, enemy tracking
+- [x] Verified World 1-1 pit positions from GA genome analysis: 847-933, 1456-1582, 2476-2548 (3 pits only; x~500 is pipes+goombas)
+
+---
+
+## Phase 2.995: Death Analytics + GA Speed Tuning (2026-03-28)
+
+> **Status:** Complete. Death type classification, position heatmap, and GA
+> speed optimization plateau-breaking improvements.
+
+### Death Type Classification
+- [x] Granular death types in `_detect_terminal_impl()`: `death_fall`, `death_enemy`, `death_timeout`, `death_unknown`
+- [x] Episode manager handles `death_*` prefix for death counting
+- [x] Trainer Lua event handler matches `death_*` prefix
+- [x] Analysis pie chart uses per-type colors and readable labels
+- [x] New death position heatmap chart (`death_positions.png`) -- stacked histogram by X position, colored by cause, pit zones marked
+
+### GA Speed Optimization Tuning
+- [x] Tiered mutation (1.5%/4%/10%) replaces uniform 5% -- 60%/25%/15% population split
+- [x] Stagnation detection in Phase 2: tracks gens without improvement, adds +0.5%/gen boost after 8 stale gens
+- [x] Segment DB diversity filter: entries must differ by >=20 frames to avoid clone saturation
+- [x] Segment splicing variants: light (1%), medium (3%), heavy (8%), and trimmed
+- [x] Smart trimming: 80-95% genome retention, 25% trim chance when stagnating
+- [x] Recovery mutation reduced 3% -> 1.5% for better completion survival
+
+### Level Data Corrections
+- [x] Removed false pit at x=449-592 (tall pipes + goombas, not a gap)
+- [x] All files corrected to 3 pits: `reward_calculator.py`, `analyze_session.py`, `debug_overlay.lua`, `README.md`, `FEATURE_TRACKER.md`
+- [x] Zone survival chart labels corrected to match actual level layout
+
+---
+
 ## Phase 3: Make It Reliable
 
 > **Goal:** Training runs for hours without crashes or connection drops.

@@ -262,7 +262,7 @@ class EpisodeManager:
             self.current_episode.termination_reason = termination_reason
             
             # Handle different termination reasons
-            if termination_reason == "death":
+            if termination_reason.startswith("death"):
                 self.current_episode.deaths += 1
                 self.current_episode.death_causes.append(termination_reason)
             elif termination_reason == "level_complete":

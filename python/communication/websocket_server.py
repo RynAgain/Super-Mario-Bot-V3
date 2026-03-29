@@ -731,6 +731,23 @@ class WebSocketServer:
             self.logger.warning(f"Failed to send training control command: {command}")
         return success
     
+    async def send_set_speed(self, speed_mode: str = "turbo"):
+        """
+        Send speed mode command to FCEUX Lua script.
+        
+        Args:
+            speed_mode: "turbo" (max speed, no rendering) or "normal" (60fps with display)
+        """
+        control_data = {
+            'type': 'training_control',
+            'command': 'set_speed',
+            'speed_mode': speed_mode
+        }
+        success = await self._send_json(control_data)
+        if success:
+            self.logger.debug(f"Speed mode set to: {speed_mode}")
+        return success
+    
     async def _ping_task(self):
         """Background task to monitor connection health.
         

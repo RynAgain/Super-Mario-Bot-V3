@@ -465,10 +465,41 @@ class MarioTrainer:
                 if git_enabled and self.current_episode > 0 and self.current_episode % git_interval == 0:
                     self._try_git_commit_logs()
                 
-                # Skip evaluation completely to prevent connection drops
-                # Evaluation causes WebSocket disconnection issues
-                # if self.current_episode % self.training_config.evaluation_frequency == 0:
-                #     await self._run_evaluation()
+                # Visual evaluation every 100 episodes: switch to normal speed so you can
+                # watch the agent play, then switch back to turbo for training.
+                # The eval episode uses epsilon=0 (greedy policy, no random actions).
+                eval_interval = self.config.get('training', {}).get('evaluation_frequency', 100)
+                if (self.current_episode > 0 and
+                    self.current_episode % eval_interval == 0 and
+                    self.training_phase != TrainingPhase.WARMUP):
+                    self.logger.info(f"=== EVALUATION EPISODE {self.current_episode} (normal speed, eps=0) ===")
+                    try:
+                        # Switch to normal speed for viewing
+                        await self.websocket_server.send_set_speed("normal")
+                        
+                        # Save current epsilon and set to greedy
+                        saved_epsilon = self.agent.epsilon
+                        self.agent.epsilon = 0.0
+                        self.training_phase = TrainingPhase.EVALUATION
+                        
+                        # The next episode will run with epsilon=0 at normal speed
+                        # After that episode ends, restore training state
+                    except Exception as e:
+                        self.logger.warning(f"Failed to start evaluation: {e}")
+                
+                # After eval episode ends, restore turbo + training epsilon
+                if self.training_phase == TrainingPhase.EVALUATION:
+                    # Check if the eval episode just ended (status != running)
+                    if (self.episode_manager.current_episode and
+                        self.episode_manager.current_episode.status.value != "running"):
+                        try:
+                            await self.websocket_server.send_set_speed("turbo")
+                            self.agent.epsilon = saved_epsilon if 'saved_epsilon' in dir() else self.agent.epsilon
+                            self.training_phase = TrainingPhase.TRAINING
+                            self.logger.info(f"=== EVALUATION COMPLETE, back to turbo training ===")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to restore training mode: {e}")
+                            self.training_phase = TrainingPhase.TRAINING
                 
                 self.current_episode += 1
             
@@ -1168,7 +1199,7 @@ class MarioTrainer:
         # Lua sends the terminal game_state frame just before this event,
         # so the reward calculator and replay buffer already have the death data.
         # This handler ensures the training loop sees the episode as finished.
-        if event in ('death', 'level_complete', 'time_up'):
+        if event in ('death', 'level_complete', 'time_up') or event.startswith('death_'):
             if (self.episode_manager.current_episode and
                     self.episode_manager.current_episode.status.value == "running"):
                 from python.environment.episode_manager import EpisodeStatus
@@ -1176,7 +1207,7 @@ class MarioTrainer:
                 if event == 'level_complete':
                     self.episode_manager.current_episode.level_completed = True
                     self.episode_manager.current_episode.status = EpisodeStatus.COMPLETED
-                elif event == 'death':
+                elif event == 'death' or event.startswith('death_'):
                     self.episode_manager.current_episode.status = EpisodeStatus.FAILED
                 else:
                     self.episode_manager.current_episode.status = EpisodeStatus.TERMINATED

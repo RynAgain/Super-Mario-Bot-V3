@@ -30,19 +30,15 @@ class KillMethod(Enum):
     UNKNOWN = "unknown"
 
 
-# Known pit X-ranges in World 1-1.
-# IMPORTANT: These must be actual ground gaps, NOT death-distribution clusters.
-# The distance distribution drops at x=300 and x=700 are from enemies/pipes, not pits.
-# Actual ground gaps in SMB 1-1 (verified against level layout):
-# Use debug_overlay.lua with manual play to verify exact X positions.
-# Set to empty until verified -- pit clear bonus disabled until positions confirmed.
+# Known pit/gap X-ranges in World 1-1.
+# Verified from GA genome analysis (genome_analysis_summary.txt, 2026-03-28).
+# The GA's jump log shows exactly where big forward jumps were needed.
+# Each entry is (approach_x, clear_x) -- bonus triggers when max_x passes clear_x.
+# NOTE: x~500 is tall pipes + goombas, NOT a pit. Only 3 real pits in 1-1.
 WORLD_1_1_PITS = [
-    # TODO: Verify with debug_overlay.lua and fill in actual pit X ranges
-    # Approximate locations from SMB 1-1 tile map (need manual verification):
-    # (1070, 1120),  # First gap (after tall pipe area)
-    # (1360, 1410),  # Second gap
-    # (1430, 1470),  # Third gap (close to second)
-    # (2480, 2530),  # Late level gap
+    (847, 933),    # First pit (jump 27: x=847->933, running jump)
+    (1456, 1582),  # Second pit - large gap (jump 34: 126px crossing)
+    (2476, 2548),  # Third pit - late gap (jump 53: 72px crossing)
 ]
 
 
@@ -707,6 +703,15 @@ class RewardCalculator:
         
         Must be called BEFORE self.previous_state is overwritten.
         
+        Death types returned:
+          - "death_fall"    : Mario fell into a pit (y > 240 or in known pit X range)
+          - "death_enemy"   : Enemy contact (closest enemy < 20px at time of death)
+          - "death_timeout"  : Timer hit zero (lives also decrease)
+          - "death_unknown"  : Life lost but cause couldn't be determined
+          - "timeout"        : Timer expired (no life loss detected yet)
+          - "stuck_timeout"  : No progress for too long
+          - "level_complete" : Level finished
+        
         Args:
             current_state: Current game state
             
@@ -718,7 +723,34 @@ class RewardCalculator:
         
         # Death detection (compare with previous_state which hasn't been overwritten yet)
         if current_state.get('lives', 3) < self.previous_state.get('lives', 3):
-            return True, "death"
+            # Classify the death cause from available game state
+            mario_y = current_state.get('mario_y', 0)
+            mario_x = current_state.get('mario_x', 0)
+            time_remaining = current_state.get('time_remaining', current_state.get('time', 400))
+            closest_enemy = current_state.get('closest_enemy_distance', 999.0)
+            
+            # 1. Fall death: Mario's Y position below the viewport floor (NES: ~240)
+            #    or Mario is inside a known pit X-range
+            is_fall = mario_y > 220  # Below visible ground level
+            if not is_fall:
+                for pit_start, pit_end in WORLD_1_1_PITS:
+                    if pit_start <= mario_x <= pit_end:
+                        is_fall = True
+                        break
+            
+            if is_fall:
+                return True, "death_fall"
+            
+            # 2. Timeout death: timer expired (game decrements life when timer hits 0)
+            if time_remaining <= 0:
+                return True, "death_timeout"
+            
+            # 3. Enemy contact: closest enemy was very near at time of death
+            if closest_enemy < 24.0:
+                return True, "death_enemy"
+            
+            # 4. Unknown: life lost but we can't determine why
+            return True, "death_unknown"
         
         # Level completion detection
         if current_state.get('is_level_complete', False):
@@ -728,7 +760,7 @@ class RewardCalculator:
             self._level_complete_detected = True
             return True, "level_complete"
         
-        # Timeout detection
+        # Timeout detection (timer expired but life hasn't dropped yet this frame)
         time_remaining = current_state.get('time_remaining', current_state.get('time', 400))
         if time_remaining <= 0:
             return True, "timeout"
