@@ -673,7 +673,23 @@ class DQNAgent:
         Per-step decay with rate 0.9995 takes ~6000 steps to reach 0.05,
         which means epsilon barely moves during early training.
         Per-episode decay with rate 0.998 reaches 0.05 in ~1500 episodes.
+        
+        SAFETY: Detects and recovers from epsilon collapse (e.g., if evaluation
+        mode accidentally left epsilon at 0.0). The hard floor is epsilon_end.
         """
+        old_epsilon = self.epsilon
+        
+        # COLLAPSE DETECTION: if epsilon is at or below 0 before decay, something
+        # external zeroed it (evaluation mode, bug, etc.). Recover to epsilon_end.
+        if self.epsilon <= 0.0:
+            self.logger.error(
+                f"EPSILON COLLAPSE DETECTED: epsilon={self.epsilon:.6f} "
+                f"(should never be <= 0). Recovering to epsilon_end={self.epsilon_end}. "
+                f"This usually means evaluation mode failed to restore epsilon."
+            )
+            self.epsilon = self.epsilon_end
+            return
+        
         if self.epsilon_decay_type == 'exponential':
             self.epsilon = max(
                 self.epsilon_end,
@@ -685,6 +701,21 @@ class DQNAgent:
             self.epsilon = max(
                 self.epsilon_end,
                 self.epsilon - decay_amount
+            )
+        
+        # HARD FLOOR: absolute safety net -- epsilon must never go below epsilon_end
+        if self.epsilon < self.epsilon_end:
+            self.logger.warning(
+                f"Epsilon {self.epsilon:.6f} fell below floor {self.epsilon_end}. "
+                f"Clamping to floor."
+            )
+            self.epsilon = self.epsilon_end
+        
+        # Log large jumps (>50% drop in one episode = suspicious)
+        if old_epsilon > 0 and self.epsilon / old_epsilon < 0.5:
+            self.logger.warning(
+                f"LARGE EPSILON DROP: {old_epsilon:.6f} -> {self.epsilon:.6f} "
+                f"({(1 - self.epsilon / old_epsilon) * 100:.1f}% decrease in one episode)"
             )
     
     def episode_end(self, total_reward: float, episode_length: int):
@@ -767,10 +798,32 @@ class DQNAgent:
         self.step = metadata.get('step', 0)
         self.training_step = metadata.get('training_step', 0)
         
+        # Restore epsilon from checkpoint metrics (prevents reset to 1.0 on resume).
+        # The checkpoint saves epsilon in metrics dict -- check both locations.
+        restored_epsilon = metadata.get('metrics', {}).get('epsilon', None)
+        if restored_epsilon is None:
+            restored_epsilon = metadata.get('epsilon', None)
+        
+        if restored_epsilon is not None and restored_epsilon > 0:
+            old_epsilon = self.epsilon
+            self.epsilon = max(self.epsilon_end, restored_epsilon)
+            self.logger.info(
+                f"Epsilon restored from checkpoint: {old_epsilon:.6f} -> {self.epsilon:.6f}"
+            )
+        else:
+            self.logger.warning(
+                f"No valid epsilon found in checkpoint metadata. "
+                f"Keeping current epsilon={self.epsilon:.6f}. "
+                f"If this is a fresh start, epsilon_start={self.epsilon_start} is correct."
+            )
+        
         # Update target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        self.logger.info(f"Loaded checkpoint from episode {self.episode}")
+        self.logger.info(
+            f"Loaded checkpoint from episode {self.episode} "
+            f"(epsilon={self.epsilon:.6f}, training_step={self.training_step})"
+        )
         
         return metadata
     

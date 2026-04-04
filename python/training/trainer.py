@@ -101,6 +101,11 @@ class MarioTrainer:
         self.current_step = 0
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        # Evaluation episode state -- promoted to instance var so it survives
+        # across the episode boundary (the old local variable was lost when
+        # _update_training_phase() overwrote the phase before restore ran).
+        self._saved_epsilon_for_eval: Optional[float] = None
+        
         # Performance tracking
         self.frame_times = []
         self.processing_times = []
@@ -465,40 +470,65 @@ class MarioTrainer:
                 if git_enabled and self.current_episode > 0 and self.current_episode % git_interval == 0:
                     self._try_git_commit_logs()
                 
-                # Visual evaluation every 100 episodes: switch to normal speed so you can
+                # Visual evaluation every N episodes: switch to normal speed so you can
                 # watch the agent play, then switch back to turbo for training.
                 # The eval episode uses epsilon=0 (greedy policy, no random actions).
+                #
+                # BUG FIX: The old code used a local variable `saved_epsilon` which was
+                # lost when _update_training_phase() at the start of the next episode
+                # overwrote TrainingPhase.EVALUATION -> TRAINING before the restore block
+                # could execute. This caused epsilon to stay at 0.0 permanently.
+                # Now uses self._saved_epsilon_for_eval (instance variable).
                 eval_interval = self.config.get('training', {}).get('evaluation_frequency', 100)
                 if (self.current_episode > 0 and
                     self.current_episode % eval_interval == 0 and
-                    self.training_phase != TrainingPhase.WARMUP):
+                    self.training_phase != TrainingPhase.WARMUP and
+                    self.training_phase != TrainingPhase.EVALUATION):
                     self.logger.info(f"=== EVALUATION EPISODE {self.current_episode} (normal speed, eps=0) ===")
                     try:
                         # Switch to normal speed for viewing
                         await self.websocket_server.send_set_speed("normal")
                         
-                        # Save current epsilon and set to greedy
-                        saved_epsilon = self.agent.epsilon
+                        # Save current epsilon to instance var and set to greedy
+                        self._saved_epsilon_for_eval = self.agent.epsilon
                         self.agent.epsilon = 0.0
                         self.training_phase = TrainingPhase.EVALUATION
                         
-                        # The next episode will run with epsilon=0 at normal speed
-                        # After that episode ends, restore training state
+                        self.logger.info(
+                            f"Epsilon saved for eval restore: {self._saved_epsilon_for_eval:.6f}"
+                        )
                     except Exception as e:
                         self.logger.warning(f"Failed to start evaluation: {e}")
                 
-                # After eval episode ends, restore turbo + training epsilon
+                # After eval episode ends, restore turbo + training epsilon.
+                # This MUST run before _start_episode() / _update_training_phase()
+                # which would overwrite the phase and lose the restore opportunity.
                 if self.training_phase == TrainingPhase.EVALUATION:
                     # Check if the eval episode just ended (status != running)
                     if (self.episode_manager.current_episode and
                         self.episode_manager.current_episode.status.value != "running"):
                         try:
                             await self.websocket_server.send_set_speed("turbo")
-                            self.agent.epsilon = saved_epsilon if 'saved_epsilon' in dir() else self.agent.epsilon
+                            if self._saved_epsilon_for_eval is not None:
+                                self.agent.epsilon = self._saved_epsilon_for_eval
+                                self.logger.info(
+                                    f"Epsilon restored after eval: {self.agent.epsilon:.6f}"
+                                )
+                                self._saved_epsilon_for_eval = None
+                            else:
+                                self.logger.error(
+                                    "EPSILON RESTORE FAILED: _saved_epsilon_for_eval is None! "
+                                    "Epsilon may be stuck at 0. Current epsilon: "
+                                    f"{self.agent.epsilon:.6f}"
+                                )
                             self.training_phase = TrainingPhase.TRAINING
                             self.logger.info(f"=== EVALUATION COMPLETE, back to turbo training ===")
                         except Exception as e:
                             self.logger.warning(f"Failed to restore training mode: {e}")
+                            # CRITICAL: Still restore epsilon even if speed change fails
+                            if self._saved_epsilon_for_eval is not None:
+                                self.agent.epsilon = self._saved_epsilon_for_eval
+                                self._saved_epsilon_for_eval = None
                             self.training_phase = TrainingPhase.TRAINING
                 
                 self.current_episode += 1
@@ -1505,7 +1535,30 @@ class MarioTrainer:
             self.current_episode = additional_data.get('current_episode', 0)
             self.current_step = additional_data.get('current_step', 0)
             
-            self.logger.info(f"Resumed from episode {self.current_episode}")
+            # Restore epsilon from checkpoint training_state (prevents reset to 1.0).
+            # state_manager.load_checkpoint() restores self.state_manager.training_state
+            # which includes the epsilon value at the time of checkpoint creation.
+            if (self.state_manager.training_state and
+                self.state_manager.training_state.epsilon > 0):
+                old_epsilon = self.agent.epsilon
+                self.agent.epsilon = max(
+                    self.agent.epsilon_end,
+                    self.state_manager.training_state.epsilon
+                )
+                self.logger.info(
+                    f"Epsilon restored from checkpoint: {old_epsilon:.6f} -> "
+                    f"{self.agent.epsilon:.6f}"
+                )
+            else:
+                self.logger.warning(
+                    f"No valid epsilon in checkpoint training_state. "
+                    f"Agent epsilon remains at {self.agent.epsilon:.6f}"
+                )
+            
+            self.logger.info(
+                f"Resumed from episode {self.current_episode} "
+                f"(epsilon={self.agent.epsilon:.6f})"
+            )
             
         except Exception as e:
             self.logger.error(f"Failed to resume from checkpoint: {e}")
